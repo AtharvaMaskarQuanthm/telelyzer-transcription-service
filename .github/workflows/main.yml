@@ -21,26 +21,3 @@ jobs:
 
       - name: Push image to Docker Hub
         run: docker push atharvamaskarquanthm/telelyzer-transcription-service:latest
-
-      - name: Deploy to Runpod
-        run: |
-          curl -X POST https://api.runpod.io/v2/pods \
-            -H "Authorization: Bearer ${{ secrets.RUNPOD_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            -d '{
-              "name": "my-ml-service",
-              "imageName": "atharvamaskarquanthm/telelyzer-transcription-service:latest",
-              "gpuTypeId": "NVIDIA A40",  # Replace with valid GPU ID
-              "cloudType": "SECURE",            # or "COMMUNITY"
-              "containerDiskInGb": 10,
-              "volumeInGb": 5,
-              "env": {
-                "PORT": "8000"
-              },
-              "ports": [
-                {
-                  "port": 8000,
-                  "isHttp": true
-                }
-              ]
-            }'
