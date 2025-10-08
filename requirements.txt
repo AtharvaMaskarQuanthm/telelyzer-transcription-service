@@ -1,0 +1,13 @@
+blinker==1.4
+httpx==0.28.1
+matplotlib-inline==0.1.7
+numpy==2.1.2
+requests==2.32.3
+fastapi
+uvicorn[standard]
+librosa
+torch
+torchaudio
+torchvision
+silero-vad
+transformers 
