@@ -15,6 +15,4 @@ def load_audio_from_url(audio_file_url: str) -> Tuple[np.ndarray, int]:
         return audio, sr
         
     except Exception as e:
-        print(f"Failed to load audio: {e}")
-        
-        return None, None
+        raise ValueError(f"Failed to load audio from url : {e}")

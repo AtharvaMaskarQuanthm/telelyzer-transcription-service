@@ -8,7 +8,6 @@ from app.utils.logger import get_logger
 import uvicorn
 app = FastAPI()
 
-
 # Response model
 class TranscriptionResponse(TranscriptionServiceOutput):
     success: bool = True
@@ -34,18 +33,12 @@ async def transcribe(url: str = Query(..., description="Audio file URL to transc
     try:
         transcription_service = TranscriptionService(audio_url=url)
 
+        transcripts = await transcription_service.process()
+
     except Exception as e:
         logger.error(f"Error loading audio from provided URL - Check if the URL is valid. Error : {e}")
 
-        return TranscriptionResponse(
-            transcript=None, 
-            status=None, 
-            channels=None, 
-            sampling_rate=None, 
-            success=False
-            )
-        
-    transcripts = await transcription_service.process()
+        raise
 
     return TranscriptionResponse(**transcripts.model_dump(), success=transcripts.status != TranscriptStatus.TRANSCRIPTION_ERROR)
 

@@ -1,67 +1,55 @@
 import asyncio
-import time
 import librosa
-import numpy as np
 import torch
 
-from typing import Dict, List, Literal, Tuple
-
-from app.models.transcription_model import *
-from app.models.speech_timestamps_model import *
-
-from app.schemas.transcription_service_schema import TranscriptStatus, TranscriptionServiceOutput
-from app.schemas.downsampling_schema import DownsampleOutput
-
-from app.utils.load_audio_from_url import load_audio_from_url
-from app.utils.logger import get_logger
-from app.utils.shared_resources import SharedResources
-from app.utils.audio_helper_functions import *  # split_channels, downsample_audio (your util)
+import numpy as np
 
 from silero_vad import get_speech_timestamps
+from typing import Dict, List, Literal, Optional, Tuple
+
+from app.exceptions.model_load_error import ModelLoadError
+
+from app.helpers.audio_helpers import downsample_audio, split_channels
+from app.helpers.load_audio import load_audio
+
+from app.models.audio import AudioWaveFormFormat, DownsampleOutput, SplitAudio, SpeechTimestampsChunking
+from app.models.transcription_service import TranscriptModel, TranscriptionServiceOutput, TranscriptStatus, WhisperModel
+
+from app.utils.logger import get_logger
+from app.utils.shared_resources import SharedResources
 
 logger = get_logger()
-
 
 class TranscriptionService:
     """
     This class handles the Transcription Service
     """
 
-    def __init__(self, audio_url: str) -> None:
-        """
-        Class constructor for the Transcription Service.
-        """
+    def __init__(self, audio_url : Optional[str] = None, audio_waveform : Optional[AudioWaveFormFormat] = None):
+        
+        # 1. Load the audio file
+        try:
+            self.audio_data = load_audio(audio_url=audio_url, audio_waveform=audio_waveform)
+            logger.info(f"Audio Data loaded successfully")
+            logger.info(f"Sampling rate of the audio file is: {self.audio_data.sampling_rate}")
+            logger.info(f"Number of channels in the audio file is: {self.audio_data.channels}")
+        except Exception as e:
+            logger.error(e)
+            raise
 
-        # 1. Load audio from the url
-        self.audio, self.sr = load_audio_from_url(audio_file_url=audio_url)
+        # 2. Load the shared resources. 
+        try:
+            self.vad_model = SharedResources.vad_model()
+            logger.info("VAD Model loaded successfully")
+            self.processor = SharedResources.processor()
+            logger.info("Whisper Processor Loaded successfully")
+            self.whisper_model = SharedResources.whisper_model()
+            logger.info("Whisper Model Loaded successfully")
+        except ModelLoadError as e:
+            logger.error(e)
+            raise
 
-        if self.audio is None or self.sr is None:
-            raise ValueError("Failed to load audio from the provided URL. - Check if the URL is valid")
-
-        logger.info(":Audio file successfully loaded from the url")
-
-        # NOTE: self.audio.ndim is 1 for mono and 2 for stereo (regardless of (n,2) vs (2,n) layout)
-        self.channels = self.audio.ndim
-        logger.info(f"Audio file has: {self.channels} channels")
-        logger.info(f"Sampling rate of the audio file is: {self.sr}")
-
-        self.vad_model = SharedResources.vad_model()
-        self.processor = SharedResources.processor()
-        self.whisper_model = SharedResources.whisper_model()
-
-        # Placeholders set by pipelines
-        self.downsampled_audio = None               # mono: np.ndarray ; stereo: DownsampleOutput
-        self.audio_split_channels = None            # result of split_channels()
-        self.speech_timestamps = None
-        self.speech_timestamps_chunked = None
-        self.left_channel_chunks = None
-        self.right_channel_chunks = None
-        self.audio_chunks = None
-        self.raw_transcripts = None
-
-    # -------------------------
-    # Helpers
-    # -------------------------
+    # ---- HELPER FUNCTIONS
     def _ensure_16k_mono(self, waveform: np.ndarray, sr: int) -> Tuple[np.ndarray, int]:
         """
         Return a mono, 16 kHz float32 waveform.
@@ -106,9 +94,9 @@ class TranscriptionService:
             return norm
         except Exception as e:
             logger.error(f"generate_speech_timestamps failed: {e}")
-            return []
+            raise
 
-    async def speech_timestamps_chunking_algorithm(
+    async def _speech_timestamps_chunking_algorithm(
         self,
         speech_timestamps: List[Dict],
         max_duration: float = SpeechTimestampsChunking.max_duration,
@@ -194,9 +182,9 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Error in Speech Timestamps algorithm: {e}")
-            return None  # handled by callers
+            raise
 
-    async def split_audio(
+    async def _split_audio(
         self,
         audio: np.ndarray,
         start_timestamp: float,
@@ -233,12 +221,11 @@ class TranscriptionService:
                 "end_timestamp": end_timestamp,
                 "audio_chunk": np.concatenate([silence, chunk, silence])
             }
-
         except Exception as e:
             logger.error(f"Error splitting audio into chunks: {e}")
-            return None
+            raise
 
-    async def translate_audio(self, audio_chunk_data: Dict, speaker_label: Literal["Agent", "Customer", ""]) -> Dict:
+    async def _transcribe_audio(self, audio_chunk_data: Dict, speaker_label: Literal["Left Channel", "Right Channel", ""]) -> Dict:
         try:
             if not audio_chunk_data:
                 return None
@@ -251,10 +238,10 @@ class TranscriptionService:
 
             generate_kwargs = {
                 "forced_decoder_ids": self.processor.get_decoder_prompt_ids(
-                    language="hi",
-                    task="translate"
+                    language=WhisperModel.language,
+                    task=WhisperModel.task
                 ),
-                "num_beams": 5
+                "num_beams": WhisperModel.num_beams
             }
 
             with torch.no_grad():
@@ -271,9 +258,9 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Error translating audio using Whisper Module : {e}")
-            return None
-
-    async def transcribe_stereo_calls(self):
+            raise
+        
+    async def _transcribe_stereo_calls(self):
         """
         This function analyzes the stereo calls
         """
@@ -287,8 +274,8 @@ class TranscriptionService:
             right_16k, _ = self._ensure_16k_mono(right, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
 
             # Generate speech timestamps
-            left_ts_task = self.generate_speech_timestamps(left_16k)
-            right_ts_task = self.generate_speech_timestamps(right_16k)
+            left_ts_task = self.generate_speech_timestamps(left)
+            right_ts_task = self.generate_speech_timestamps(right)
             left_ts, right_ts = await asyncio.gather(left_ts_task, right_ts_task)
 
             if not left_ts and not right_ts:
@@ -300,16 +287,16 @@ class TranscriptionService:
                 )
 
             # Chunking (each returns List[Dict] or None)
-            left_chunks_task = self.speech_timestamps_chunking_algorithm(left_ts) if left_ts else asyncio.sleep(0, result=[])
-            right_chunks_task = self.speech_timestamps_chunking_algorithm(right_ts) if right_ts else asyncio.sleep(0, result=[])
+            left_chunks_task = self._speech_timestamps_chunking_algorithm(left_ts) if left_ts else asyncio.sleep(0, result=[])
+            right_chunks_task = self._speech_timestamps_chunking_algorithm(right_ts) if right_ts else asyncio.sleep(0, result=[])
             left_chunks, right_chunks = await asyncio.gather(left_chunks_task, right_chunks_task)
 
             left_chunks = left_chunks or []
             right_chunks = right_chunks or []
 
             # Split into audio chunks
-            left_split_tasks = [self.split_audio(left_16k, c['start'], c['end']) for c in left_chunks]
-            right_split_tasks = [self.split_audio(right_16k, c['start'], c['end']) for c in right_chunks]
+            left_split_tasks = [self._split_audio(left_16k, c['start'], c['end']) for c in left_chunks]
+            right_split_tasks = [self._split_audio(right_16k, c['start'], c['end']) for c in right_chunks]
             left_splits, right_splits = await asyncio.gather(
                 asyncio.gather(*left_split_tasks),
                 asyncio.gather(*right_split_tasks)
@@ -318,8 +305,8 @@ class TranscriptionService:
             right_splits = [c for c in (right_splits or []) if c is not None]
 
             # Transcribe
-            left_tx_tasks = [self.translate_audio(c, speaker_label="Agent") for c in left_splits]
-            right_tx_tasks = [self.translate_audio(c, speaker_label="Customer") for c in right_splits]
+            left_tx_tasks = [self._transcribe_audio(c, speaker_label="Left Channel") for c in left_splits]
+            right_tx_tasks = [self._transcribe_audio(c, speaker_label="Right Channel") for c in right_splits]
 
             left_results, right_results = await asyncio.gather(
                 asyncio.gather(*left_tx_tasks) if left_tx_tasks else asyncio.sleep(0, result=[]),
@@ -332,15 +319,15 @@ class TranscriptionService:
             if not left_results and right_results:
                 return TranscriptionServiceOutput(
                     transcript=right_results,
-                    status=TranscriptStatus.ONLY_CUSTOMER_SPOKE,
+                    status=TranscriptStatus.ONLY_RIGHT_CHANNEL_AUDIO,
                     channels=TranscriptModel.expected_channels,
                     sampling_rate=TranscriptModel.expected_sampling_rate
                 )
 
-            if not right_results and left_results:
+            if left_results and not right_results:
                 return TranscriptionServiceOutput(
                     transcript=left_results,
-                    status=TranscriptStatus.ONLY_AGENT_SPOKE,
+                    status=TranscriptStatus.ONLY_LEFT_CHANNEL_AUDIO,
                     channels=TranscriptModel.expected_channels,
                     sampling_rate=TranscriptModel.expected_sampling_rate
                 )
@@ -357,14 +344,10 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Error transcribing stereo calls : {e}")
-            return TranscriptionServiceOutput(
-                transcript=[],
-                status=TranscriptStatus.TRANSCRIPTION_ERROR,
-                channels=self.channels,
-                sampling_rate=self.sr
-            )
 
-    async def transcribe_mono_calls(self):
+            raise
+
+    async def _transcribe_mono_calls(self):
         """
         This function transcribes mono calls
         """
@@ -383,7 +366,7 @@ class TranscriptionService:
                 )
 
             # 2) Chunking
-            chunked = await self.speech_timestamps_chunking_algorithm(ts)
+            chunked = await self._speech_timestamps_chunking_algorithm(ts)
             if not chunked:
                 return TranscriptionServiceOutput(
                     transcript=[],
@@ -393,7 +376,7 @@ class TranscriptionService:
                 )
 
             # 3) Split audio
-            audio_chunk_tasks = [self.split_audio(mono_16k, c['start'], c['end']) for c in chunked]
+            audio_chunk_tasks = [self._split_audio(mono_16k, c['start'], c['end']) for c in chunked]
             self.audio_chunks = await asyncio.gather(*audio_chunk_tasks)
             self.audio_chunks = [c for c in (self.audio_chunks or []) if c is not None]
 
@@ -406,7 +389,7 @@ class TranscriptionService:
                 )
 
             # 4) Transcribe (FIXED: use audio_chunks, not left_channel_chunks)
-            transcribe_audio_chunks_tasks = [self.translate_audio(chunk, speaker_label="") for chunk in self.audio_chunks]
+            transcribe_audio_chunks_tasks = [self._transcribe_audio(chunk, speaker_label="") for chunk in self.audio_chunks]
             transcription_results = await asyncio.gather(*transcribe_audio_chunks_tasks)
             transcription_results = [r for r in (transcription_results or []) if r is not None]
 
@@ -419,20 +402,16 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Error transcribing mono audio : {e}")
-            return TranscriptionServiceOutput(
-                transcript=[],
-                status=TranscriptStatus.TRANSCRIPTION_ERROR,
-                channels=self.channels,
-                sampling_rate=self.sr
-            )
+
+            raise
 
     async def process(self) -> TranscriptionServiceOutput:
         """
-        This function processes the audio
+        This function processes the audio file
         """
 
-        # 1. Check if there's a need for (down)sampling
-
+        # 1. Check if there's a need for downsampling
+    
         # 1.1 If the audio is 16k stereo, no resample needed
         if self.sr == TranscriptModel.expected_sampling_rate and self.channels == TranscriptModel.expected_channels:
             # Split but keep native 16k
@@ -444,7 +423,7 @@ class TranscriptionService:
                 downsampled_right_channel=self.audio_split_channels.right_channel
             )
 
-            self.raw_transcripts = await self.transcribe_stereo_calls()
+            self.raw_transcripts = await self._transcribe_stereo_calls()
             return self.raw_transcripts
 
         elif self.sr > TranscriptModel.expected_sampling_rate and self.channels == TranscriptModel.expected_channels:
@@ -466,20 +445,15 @@ class TranscriptionService:
                     sampling_rate=self.sr
                 )
 
-            self.raw_transcripts = await self.transcribe_stereo_calls()
+            self.raw_transcripts = await self._transcribe_stereo_calls()
             return self.raw_transcripts
 
         elif self.sr < TranscriptModel.expected_sampling_rate and self.channels < TranscriptModel.expected_channels:
             # Mono and lower than 16k — handle as mono and upsample inside the mono pipeline
             self.downsampled_audio = self.audio  # raw mono; _ensure_16k_mono() will fix SR
-            self.raw_transcripts = await self.transcribe_mono_calls()
+            self.raw_transcripts = await self._transcribe_mono_calls()
             return self.raw_transcripts
 
         else:
             logger.error(f"Unsupported file format")
-            return TranscriptionServiceOutput(
-                transcript=[],
-                status=TranscriptStatus.TRANSCRIPTION_ERROR,
-                channels=self.channels,
-                sampling_rate=self.sr
-            )
+            raise ValueError(f"Unsupported audio format: sr={self.sr}, channels={self.channels}")

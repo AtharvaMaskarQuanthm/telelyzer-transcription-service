@@ -1,5 +1,24 @@
+import numpy as np
+
 from dataclasses import dataclass
 
+@dataclass
+class LoadAudioFormat:
+    audio : np.ndarray
+    sampling_rate : int
+    channels : int
+
+@dataclass
+class AudioWaveFormFormat:
+    audio_waveform : np.ndarray
+    sampling_rate : int
+
+@dataclass
+class DownsampleOutput:
+    left_channel : np.ndarray
+    right_channel : np.ndarray
+
+# --- SPEECH TIMESTAMPS 
 @dataclass
 class SpeechTimestampsChunking:
     max_duration: float = 25.0
