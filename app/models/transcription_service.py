@@ -11,10 +11,11 @@ class TranscriptModel:
 
 @dataclass
 class WhisperModel:
-    model_id: str = "openai/whisper-large-v3"
+    # model_id: str = "AtharvaMaskarQuanthm/whisper-large-v2-hindi-lora-finetuned" # "openai/whisper-large-v3"
+    model_id: str = "AtharvaMaskarQuanthm/whisper-large-v2-hindi-lora-finetuned-merged" # "openai/whisper-large-v3"
     device: str = "cuda"
     language : str = "hi"
-    task : str = "translate"
+    task : str = "trabscribe"
     num_beams : int  = 5
 
 # --- TRANSCRIPTION SERVICE DATA CLASSES --- 
