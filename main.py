@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 from app.services.transcription_service import TranscriptionService
-from app.schemas.transcription_service_schema import TranscriptStatus, TranscriptionServiceOutput
+from app.models.transcription_service import TranscriptStatus, TranscriptionServiceOutput
 
 from app.utils.logger import get_logger
 
