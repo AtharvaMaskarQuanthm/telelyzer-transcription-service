@@ -12,3 +12,4 @@ torchvision
 silero-vad
 transformers 
 ctranslate2
+faster-whisper

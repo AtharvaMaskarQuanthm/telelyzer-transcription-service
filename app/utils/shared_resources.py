@@ -1,7 +1,7 @@
 import torch
 from silero_vad import load_silero_vad
 from transformers import AutoProcessor
-import ctranslate2
+from faster_whisper import WhisperModel
 from app.exceptions.model_load_error import ModelLoadError
 from app.models.transcription_service import WhisperModel
 
@@ -24,9 +24,8 @@ class SharedResources:
         # Load CTranslate2 Whisper Model instead of HuggingFace
         if cls._whisper_model is None:
             try:
-                cls._whisper_model = ctranslate2.models.Whisper(
-                    WhisperModel.model_path, device=WhisperModel.device  # use correct model_path and device
-                )
+                cls._whisper_model = WhisperModel(WhisperModel.model_id, device="cuda", compute_type="float16")
+
             except Exception as e:
                 raise ModelLoadError("Failed to load model", model_name="CTranslate2 Whisper") from e
         return cls._whisper_model

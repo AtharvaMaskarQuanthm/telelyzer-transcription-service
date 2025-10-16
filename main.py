@@ -55,7 +55,7 @@ async def transcribe_waveform(request: TranscribeRequest):
     
     try:
         transcription_service = TranscriptionService(
-            audio_waveform=request.audio_waveform  # FIX: Removed request.url
+            audio_waveform=request  # FIX: Removed request.url
         )
         
         transcripts = await transcription_service.process()

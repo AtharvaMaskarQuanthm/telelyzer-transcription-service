@@ -237,28 +237,9 @@ class TranscriptionService:
 
             # Prepare audio features for CTranslate2
             audio_chunk = audio_chunk_data['audio_chunk']
-            features = processor(
-                audio_chunk, sampling_rate=16000, return_tensors="np"
-            ).input_features  # Shape: (1, 80, N_frames)
-            features = ctranslate2.StorageView.from_array(features)
-
-            # Prompt tokens for language/task (if needed)
-            forced_decoder_ids = processor.get_decoder_prompt_ids(
-                language=WhisperModel.language, task=WhisperModel.task
-            )
-            prompts = [forced_decoder_ids]  # Each batch element gets a prompt
-
-            # Perform inference
-            results = ct2_model.generate(
-                features,
-                prompts,
-                beam_size=WhisperModel.num_beams,
-                max_length=448,
-            )
+            segments, info = ct2_model.transcribe(audio_chunk, beam_size=5)
             # Decode the output tokens to text
-            text = processor.batch_decode(
-                [results[0].sequences_ids[0]], skip_special_tokens=True
-            )[0]
+            text = ' '.join([s.text for s in segments])
 
             return {
                 "start_timestamp": audio_chunk_data['start_timestamp'],
