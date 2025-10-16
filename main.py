@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 from app.services.transcription_service import TranscriptionService
 from app.models.transcription_service import TranscriptStatus, TranscriptionServiceOutput
@@ -17,7 +17,8 @@ class TranscriptionResponse(TranscriptionServiceOutput):
 
 # Request Model - FIX: Inherit from BaseModel
 class TranscribeRequest(BaseModel):
-    audio_waveform: AudioWaveFormFormat
+    audio_waveform: List[float]  # Changed from np.ndarray
+    sampling_rate: int
 
 # Health check response model
 class HealthCheckResponse(BaseModel):
