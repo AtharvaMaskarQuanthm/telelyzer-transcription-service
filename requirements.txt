@@ -11,3 +11,4 @@ torchaudio
 torchvision
 silero-vad
 transformers 
+ctranslate2

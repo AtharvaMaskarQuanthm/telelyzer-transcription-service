@@ -1,4 +1,5 @@
 import asyncio
+import ctranslate
 import librosa
 import torch
 
@@ -225,37 +226,46 @@ class TranscriptionService:
             logger.error(f"Error splitting audio into chunks: {e}")
             raise
 
-    async def _transcribe_audio(self, audio_chunk_data: Dict, speaker_label: Literal["Left Channel", "Right Channel", ""]) -> Dict:
+    async def _transcribe_audio(audio_chunk_data: dict, speaker_label: str = "") -> dict:
         try:
             if not audio_chunk_data:
                 return None
 
+            # Prepare processor and model (CTranslate2 variant)
+            processor = SharedResources.processor()
+            ct2_model = SharedResources.whisper_model()
+
+            # Prepare audio features for CTranslate2
             audio_chunk = audio_chunk_data['audio_chunk']
+            features = processor(
+                audio_chunk, sampling_rate=16000, return_tensors="np"
+            ).input_features  # Shape: (1, 80, N_frames)
+            features = ctranslate2.StorageView.from_array(features)
 
-            # Whisper feature extractor expects 16k
-            inputs = self.processor(audio_chunk, sampling_rate=16000, return_tensors="pt")
-            inputs = {k: v.to(WhisperModel.device) for k, v in inputs.items()}
+            # Prompt tokens for language/task (if needed)
+            forced_decoder_ids = processor.get_decoder_prompt_ids(
+                language=WhisperModel.language, task=WhisperModel.task
+            )
+            prompts = [forced_decoder_ids]  # Each batch element gets a prompt
 
-            generate_kwargs = {
-                "forced_decoder_ids": self.processor.get_decoder_prompt_ids(
-                    language=WhisperModel.language,
-                    task=WhisperModel.task
-                ),
-                "num_beams": WhisperModel.num_beams
-            }
-
-            with torch.no_grad():
-                generated_ids = self.whisper_model.generate(**inputs, **generate_kwargs)
-
-            text = self.processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+            # Perform inference
+            results = ct2_model.generate(
+                features,
+                prompts,
+                beam_size=WhisperModel.num_beams,
+                max_length=448,
+            )
+            # Decode the output tokens to text
+            text = processor.batch_decode(
+                [results[0].sequences_ids[0]], skip_special_tokens=True
+            )[0]
 
             return {
                 "start_timestamp": audio_chunk_data['start_timestamp'],
                 "end_timestamp": audio_chunk_data['end_timestamp'],
                 "text": text.strip(),
-                "speaker_label": speaker_label
+                "speaker_label": speaker_label,
             }
-
         except Exception as e:
             logger.error(f"Error translating audio using Whisper Module : {e}")
             raise
