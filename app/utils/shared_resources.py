@@ -3,7 +3,7 @@ from silero_vad import load_silero_vad
 from transformers import AutoProcessor
 from faster_whisper import WhisperModel
 from app.exceptions.model_load_error import ModelLoadError
-from app.models.transcription_service import WhisperModel
+from app.models.transcription_service import WhisperModelData
 
 class SharedResources:
     _vad_model = None
@@ -24,10 +24,10 @@ class SharedResources:
         # Load CTranslate2 Whisper Model instead of HuggingFace
         if cls._whisper_model is None:
             try:
-                cls._whisper_model = WhisperModel(WhisperModel.model_id, device="cuda", compute_type="float16")
+                cls._whisper_model = WhisperModel(WhisperModelData.model_id, device="cuda", compute_type="float16")
 
             except Exception as e:
-                raise ModelLoadError("Failed to load model", model_name="CTranslate2 Whisper") from e
+                raise ModelLoadError("Failed to load model CTranslate2 Whisper", model_name="CTranslate2 Whisper") from e
         return cls._whisper_model
 
     @classmethod
@@ -35,7 +35,7 @@ class SharedResources:
         # Huggingface processor for feature extraction
         if cls._processor is None:
             try:
-                cls._processor = AutoProcessor.from_pretrained(WhisperModel.model_id)
+                cls._processor = AutoProcessor.from_pretrained(WhisperModelData.model_id)
             except Exception as e:
                 raise ModelLoadError("Failed to load model", model_name="Whisper Processor") from e
         return cls._processor

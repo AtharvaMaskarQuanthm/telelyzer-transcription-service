@@ -10,7 +10,7 @@ class TranscriptModel:
     mono_sampling_rate : int = 16000
 
 @dataclass
-class WhisperModel:
+class WhisperModelData:
     # model_id: str = "AtharvaMaskarQuanthm/whisper-large-v2-hindi-lora-finetuned" # "openai/whisper-large-v3"
     model_id: str = "AtharvaMaskarQuanthm/whisper-large-v2-hindi-lora-finetuned-merged" # "openai/whisper-large-v3"
     device: str = "cuda"

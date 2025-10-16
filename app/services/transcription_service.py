@@ -14,7 +14,7 @@ from app.helpers.audio_helpers import downsample_audio, split_channels
 from app.helpers.load_audio import load_audio
 
 from app.models.audio import AudioWaveFormFormat, DownsampleOutput, SplitAudio, SpeechTimestampsChunking
-from app.models.transcription_service import TranscriptModel, TranscriptionServiceOutput, TranscriptStatus, WhisperModel
+from app.models.transcription_service import TranscriptModel, TranscriptionServiceOutput, TranscriptStatus, WhisperModelData
 
 from app.utils.logger import get_logger
 from app.utils.shared_resources import SharedResources
