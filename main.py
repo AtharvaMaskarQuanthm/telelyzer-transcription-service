@@ -15,9 +15,9 @@ app = FastAPI()
 class TranscriptionResponse(TranscriptionServiceOutput):
     success: bool = True
 
-# Request Model
-class TranscribeRequest():
-    audio_waveform : Optional[AudioWaveFormFormat]
+# Request Model - FIX: Inherit from BaseModel
+class TranscribeRequest(BaseModel):
+    audio_waveform: AudioWaveFormFormat
 
 # Health check response model
 class HealthCheckResponse(BaseModel):
@@ -44,23 +44,17 @@ async def transcribe_url(url: str = Query(..., description="Audio file URL to tr
 
     except Exception as e:
         logger.error(f"Error loading audio from provided URL - Check if the URL is valid. Error : {e}")
-
-        raise
+        raise HTTPException(status_code=500, detail=str(e))
 
     return TranscriptionResponse(**transcripts.model_dump(), success=transcripts.status != TranscriptStatus.TRANSCRIPTION_ERROR)
  
 @app.post("/transcribe-waveform", response_model=TranscriptionResponse)
-async def transcribe_waveform(request : TranscribeRequest):
-    if not request.audio_waveform:
-        raise HTTPException(
-            status_code=400,
-            detail="'audio_waveform' must be provided"
-        )
+async def transcribe_waveform(request: TranscribeRequest):
+    # FIX: Removed redundant check since audio_waveform is required in the model
     
     try:
         transcription_service = TranscriptionService(
-            audio_url=request.url,
-            audio_waveform=request.audio_waveform
+            audio_waveform=request.audio_waveform  # FIX: Removed request.url
         )
         
         transcripts = await transcription_service.process()
