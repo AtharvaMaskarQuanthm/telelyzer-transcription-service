@@ -1,5 +1,5 @@
 import asyncio
-import ctranslate
+import ctranslate2
 import librosa
 import torch
 
