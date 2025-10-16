@@ -1,4 +1,6 @@
 import numpy as np
+from pydantic import BaseModel, field_validator
+from typing import List
 
 from dataclasses import dataclass
 
@@ -8,10 +10,20 @@ class LoadAudioFormat:
     sampling_rate : int
     channels : int
 
-@dataclass
-class AudioWaveFormFormat:
-    audio_waveform : np.ndarray
-    sampling_rate : int
+class AudioWaveFormFormat(BaseModel):
+    audio_waveform: List[float]  # Changed from np.ndarray
+    sampling_rate: int
+    
+    @field_validator('audio_waveform', mode='before')
+    @classmethod
+    def convert_numpy_to_list(cls, v):
+        if isinstance(v, np.ndarray):
+            return v.tolist()
+        return v
+    
+    # Helper method to get as numpy array when needed
+    def get_numpy_array(self) -> np.ndarray:
+        return np.array(self.audio_waveform)
 
 @dataclass
 class DownsampleOutput:
