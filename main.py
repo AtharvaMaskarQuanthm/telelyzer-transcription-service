@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
+from dataclasses import asdict
 
 from app.services.transcription_service import TranscriptionService
 from app.models.transcription_service import TranscriptStatus, TranscriptionServiceOutput
@@ -11,13 +12,17 @@ from app.utils.logger import get_logger
 import uvicorn
 app = FastAPI()
 
-# Response model
-class TranscriptionResponse(TranscriptionServiceOutput):
+# Response model - Create as Pydantic model, not inheriting from dataclass
+class TranscriptionResponse(BaseModel):
+    transcript: List[dict]  # Adjust based on your actual structure
+    status: str
+    channels: int
+    sampling_rate: int
     success: bool = True
 
-# Request Model - FIX: Inherit from BaseModel
+# Request Model
 class TranscribeRequest(BaseModel):
-    audio_waveform: List[float]  # Changed from np.ndarray
+    audio_waveform: List[float]
     sampling_rate: int
 
 # Health check response model
@@ -37,25 +42,30 @@ async def health_check():
 
 @app.get("/transcribe-url", response_model=TranscriptionResponse)
 async def transcribe_url(url: str = Query(..., description="Audio file URL to transcribe")):
-
     try:
         transcription_service = TranscriptionService(audio_url=url)
-
         transcripts = await transcription_service.process()
 
     except Exception as e:
         logger.error(f"Error loading audio from provided URL - Check if the URL is valid. Error : {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
-    return TranscriptionResponse(**transcripts.model_dump(), success=transcripts.status != TranscriptStatus.TRANSCRIPTION_ERROR)
+    return TranscriptionResponse(
+        **asdict(transcripts),  # Use asdict() for dataclass
+        success=transcripts.status != TranscriptStatus.TRANSCRIPTION_ERROR
+    )
  
 @app.post("/transcribe-waveform", response_model=TranscriptionResponse)
 async def transcribe_waveform(request: TranscribeRequest):
-    # FIX: Removed redundant check since audio_waveform is required in the model
-    
     try:
+        # Create AudioWaveFormFormat object from request
+        audio_format = AudioWaveFormFormat(
+            audio_waveform=request.audio_waveform,
+            sampling_rate=request.sampling_rate
+        )
+        
         transcription_service = TranscriptionService(
-            audio_waveform=request  # FIX: Removed request.url
+            audio_waveform=audio_format  # Pass the AudioWaveFormFormat object
         )
         
         transcripts = await transcription_service.process()
@@ -65,7 +75,7 @@ async def transcribe_waveform(request: TranscribeRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
     return TranscriptionResponse(
-        **transcripts.model_dump(),
+        **asdict(transcripts),  # Use asdict() for dataclass
         success=transcripts.status != TranscriptStatus.TRANSCRIPTION_ERROR
     )
 

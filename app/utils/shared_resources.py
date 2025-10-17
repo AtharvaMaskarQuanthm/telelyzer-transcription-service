@@ -27,7 +27,7 @@ class SharedResources:
                 cls._whisper_model = WhisperModel(WhisperModelData.model_id, device="cuda", compute_type="float16")
 
             except Exception as e:
-                raise ModelLoadError("Failed to load model CTranslate2 Whisper", model_name="CTranslate2 Whisper") from e
+                raise ModelLoadError(f"Failed to load model CTranslate2 Whisper {e}", model_name="CTranslate2 Whisper") from e
         return cls._whisper_model
 
     @classmethod

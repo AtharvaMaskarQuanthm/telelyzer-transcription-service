@@ -25,7 +25,13 @@ def load_audio(audio_url : Optional[str] = None, audio_waveform : Optional[Audio
     
     # 1. If the audio is in the waveform format
     if audio_waveform is not None:
-        return audio_waveform.audio_waveform, audio_waveform.sampling_rate
+        print(audio_waveform.__dict__.keys())
+        
+        return LoadAudioFormat(
+            audio=np.array(audio_waveform.audio_waveform), 
+            sampling_rate=audio_waveform.sampling_rate, 
+            channels=int(np.array(audio_waveform.audio_waveform).ndim)
+        )
 
     # 2. If the audio is in the audio file
     audio_waveform, sampling_rate = load_audio_from_url(audio_file_url=audio_url)

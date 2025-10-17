@@ -12,7 +12,7 @@ class TranscriptModel:
 @dataclass
 class WhisperModelData:
     # model_id: str = "AtharvaMaskarQuanthm/whisper-large-v2-hindi-lora-finetuned" # "openai/whisper-large-v3"
-    model_id: str = "AtharvaMaskarQuanthm/whisper-large-v2-hindi-lora-finetuned-merged" # "openai/whisper-large-v3"
+    model_id: str = "AtharvaMaskarQuanthm/faster-whisper-large-v2-hindi-lora-finetuned-merged" # "openai/whisper-large-v3"
     device: str = "cuda"
     language : str = "hi"
     task : str = "trabscribe"

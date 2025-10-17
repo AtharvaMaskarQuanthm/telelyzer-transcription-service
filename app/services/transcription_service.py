@@ -31,6 +31,9 @@ class TranscriptionService:
         # 1. Load the audio file
         try:
             self.audio_data = load_audio(audio_url=audio_url, audio_waveform=audio_waveform)
+            self.sr = self.audio_data.sampling_rate
+            self.channels = self.audio_data.channels
+            self.audio = self.audio_data.audio
             logger.info(f"Audio Data loaded successfully")
             logger.info(f"Sampling rate of the audio file is: {self.audio_data.sampling_rate}")
             logger.info(f"Number of channels in the audio file is: {self.audio_data.channels}")
@@ -42,8 +45,8 @@ class TranscriptionService:
         try:
             self.vad_model = SharedResources.vad_model()
             logger.info("VAD Model loaded successfully")
-            self.processor = SharedResources.processor()
-            logger.info("Whisper Processor Loaded successfully")
+            # self.processor = SharedResources.processor()
+            # logger.info("Whisper Processor Loaded successfully")
             self.whisper_model = SharedResources.whisper_model()
             logger.info("Whisper Model Loaded successfully")
         except ModelLoadError as e:
@@ -226,13 +229,12 @@ class TranscriptionService:
             logger.error(f"Error splitting audio into chunks: {e}")
             raise
 
-    async def _transcribe_audio(audio_chunk_data: dict, speaker_label: str = "") -> dict:
+    async def _transcribe_audio(self, audio_chunk_data: dict, speaker_label: str = "") -> dict:
         try:
             if not audio_chunk_data:
                 return None
 
             # Prepare processor and model (CTranslate2 variant)
-            processor = SharedResources.processor()
             ct2_model = SharedResources.whisper_model()
 
             # Prepare audio features for CTranslate2
