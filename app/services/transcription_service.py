@@ -83,7 +83,16 @@ class TranscriptionService:
         Returns a List[{'start': float, 'end': float}] in seconds.
         """
         try:
-            ts = get_speech_timestamps(audio_16k_mono, self.vad_model, sampling_rate=16000, return_seconds=True)
+            ts = get_speech_timestamps(
+                    audio_16k_mono, 
+                    self.vad_model,  # ✅ This is fine, using the loaded model
+                    sampling_rate=16000,
+                    threshold=0.3,  # ✅ ADD THESE PARAMETERS
+                    min_speech_duration_ms=250,
+                    min_silence_duration_ms=2000,
+                    speech_pad_ms=500,
+                    return_seconds=True
+                )
             if not isinstance(ts, list):
                 logger.error("VAD returned non-list: %s", type(ts))
                 return []
@@ -259,10 +268,11 @@ class TranscriptionService:
         start_timestamp: float,
         end_timestamp: float,
         sampling_rate: int = TranscriptModel.expected_sampling_rate,
-        silence_duration: float = SplitAudio.silence_duration,
-        leading_extension: float = SplitAudio.leading_extension,
-        trailing_extension: float = SplitAudio.trailing_extension
+        silence_duration: float = 0.1,  # REDUCED: Minimal silence
+        leading_extension: float = 0.0,  # REMOVED: Padding already in chunk timestamps
+        trailing_extension: float = 0.0,  # REMOVED: Padding already in chunk timestamps
     ) -> Dict:
+
 
         def normalize_rms(a: np.ndarray, target_dBFS: float = -20.0) -> np.ndarray:
             rms = np.sqrt(np.mean(a ** 2))
@@ -273,8 +283,8 @@ class TranscriptionService:
             return a * factor
 
         try:
-            start_sample = max(0, int((start_timestamp - leading_extension) * sampling_rate))
-            end_sample = min(len(audio), int((end_timestamp + trailing_extension) * sampling_rate))
+            start_sample = max(0, int(start_timestamp * sampling_rate))
+            end_sample = min(len(audio), int(end_timestamp * sampling_rate))
 
             if end_sample <= start_sample:
                 logger.warning(f"Invalid split range: start={start_sample}, end={end_sample}")
@@ -304,7 +314,7 @@ class TranscriptionService:
 
             # Prepare audio features for CTranslate2
             audio_chunk = audio_chunk_data['audio_chunk']
-            segments, info = ct2_model.transcribe(audio_chunk, beam_size=5)
+            segments, info = ct2_model.transcribe(audio_chunk, beam_size=5, language = "hi", vad_filter=False) # NOTE : If something breaks check here 
             # Decode the output tokens to text
             text = ' '.join([s.text for s in segments])
 
@@ -424,7 +434,23 @@ class TranscriptionService:
                 )
 
             # 2) Chunking
-            chunked = await self._speech_timestamps_chunking_algorithm(ts)
+            audio_duration = len(mono_16k) / 16000
+            chunked = await self._speech_timestamps_chunking_algorithm(
+                ts, 
+                audio_duration=audio_duration,
+                verbose=True  # Enable logging
+            )
+
+            # Log coverage for debugging
+            if chunked:
+                total_covered = sum(c['end'] - c['start'] for c in chunked)
+                coverage = (total_covered / audio_duration) * 100
+                logger.info(f"Audio coverage: {coverage:.1f}% ({len(chunked)} chunks)")
+                
+                if coverage < 90:
+                    logger.warning(f"LOW COVERAGE: Only {coverage:.1f}% of audio will be transcribed!")
+                    logger.warning(f"Consider adjusting VAD parameters or disabling VAD")
+
             if not chunked:
                 return TranscriptionServiceOutput(
                     transcript=[],
