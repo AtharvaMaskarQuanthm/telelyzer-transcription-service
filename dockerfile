@@ -1,27 +1,20 @@
-FROM nvidia/cuda:12.2.0-cudnn8-runtime-ubuntu22.04
+FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app \
-    DEBIAN_FRONTEND=noninteractive
+    PYTHONPATH=/app
 
 WORKDIR /app
 
-# Install Python 3.11 and system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    python3.11 \
-    python3.11-dev \
-    python3-pip \
-    build-essential \
-    libsndfile1 \
-    ffmpeg \
-    wget \
-    ca-certificates \
+# Install system dependencies for librosa, torchaudio, etc.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends \
+       build-essential \
+       libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Make python3.11 the default
-RUN update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.11 1 \
-    && update-alternatives --install /usr/bin/python python /usr/bin/python3.11 1
+
+RUN apt-get update && apt-get install -y ffmpeg
 
 # Copy dependency files first to leverage caching
 COPY requirements.txt .
@@ -33,14 +26,14 @@ RUN pip install --no-cache-dir --upgrade pip \
 COPY app/ ./app/
 COPY main.py .
 
-# Create non-root user (optional - RunPod usually runs as root)
-RUN useradd -m -u 1000 user \
+# Create non-root user
+RUN adduser --disabled-password --gecos '' --shell /bin/bash user \
     && chown -R user:user /app
 USER user
 
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/health', timeout=5)" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:8000/docs', timeout=5)" || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
