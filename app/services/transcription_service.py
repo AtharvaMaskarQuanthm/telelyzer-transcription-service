@@ -104,6 +104,13 @@ class TranscriptionService:
                     norm.append({'start': float(seg['start']), 'end': float(seg['end'])})
                 else:
                     logger.warning("Skipping malformed VAD segment: %s", seg)
+
+            if norm:
+                total_speech = sum(s['end'] - s['start'] for s in norm)
+                logger.info(f"VAD found {len(norm)} segments, total speech: {total_speech:.2f}s")
+            else:
+                logger.warning("VAD found no speech segments!")
+            
             return norm
         except Exception as e:
             logger.error(f"generate_speech_timestamps failed: {e}")
@@ -361,6 +368,15 @@ class TranscriptionService:
 
             left_chunks = left_chunks or []
             right_chunks = right_chunks or []
+
+            # ADD COVERAGE LOGGING HERE ⬇️
+            audio_duration = len(left_16k) / 16000
+            if left_chunks:
+                left_coverage = sum(c['end'] - c['start'] for c in left_chunks) / audio_duration * 100
+                logger.info(f"Left channel coverage: {left_coverage:.1f}% ({len(left_chunks)} chunks)")
+            if right_chunks:
+                right_coverage = sum(c['end'] - c['start'] for c in right_chunks) / audio_duration * 100
+                logger.info(f"Right channel coverage: {right_coverage:.1f}% ({len(right_chunks)} chunks)")
 
             # Split into audio chunks
             left_split_tasks = [self._split_audio(left_16k, c['start'], c['end']) for c in left_chunks]
