@@ -76,6 +76,29 @@ class TranscriptionService:
             waveform = waveform.astype(np.float32)
 
         return waveform, sr
+    
+    async def generate_speech_timestamps(self, audio_16k_mono: np.ndarray) -> List[Dict]:
+        """
+        Wrapper over Silero VAD. Expects 16 kHz mono array of float32.
+        Returns a List[{'start': float, 'end': float}] in seconds.
+        """
+        try:
+            ts = get_speech_timestamps(audio_16k_mono, self.vad_model, sampling_rate=16000, return_seconds=True)
+            if not isinstance(ts, list):
+                logger.error("VAD returned non-list: %s", type(ts))
+                return []
+
+            norm = []
+            for seg in ts:
+                if isinstance(seg, dict) and ('start' in seg) and ('end' in seg):
+                    # Ensure seconds (float)
+                    norm.append({'start': float(seg['start']), 'end': float(seg['end'])})
+                else:
+                    logger.warning("Skipping malformed VAD segment: %s", seg)
+            return norm
+        except Exception as e:
+            logger.error(f"generate_speech_timestamps failed: {e}")
+            raise
 
     async def _speech_timestamps_chunking_algorithm(
         self,
