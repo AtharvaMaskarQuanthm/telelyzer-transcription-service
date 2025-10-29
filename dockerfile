@@ -17,12 +17,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY requirements.txt .
 
 # Install cuDNN and cublas for CTranslate2
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir nvidia-cudnn-cu12 nvidia-cublas-cu12 && \
-    pip install --no-cache-dir -r requirements.txt
 
 # Set library paths for cuDNN
-ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:$LD_LIBRARY_PATH
+# ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:$LD_LIBRARY_PATH
 
 # Copy application code
 COPY app/ ./app/
