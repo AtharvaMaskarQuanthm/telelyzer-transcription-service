@@ -45,8 +45,6 @@ class TranscriptionService:
         try:
             self.vad_model = SharedResources.vad_model()
             logger.info("VAD Model loaded successfully")
-            # self.processor = SharedResources.processor()
-            # logger.info("Whisper Processor Loaded successfully")
             self.whisper_model = SharedResources.whisper_model()
             logger.info("Whisper Model Loaded successfully")
         except ModelLoadError as e:
@@ -85,9 +83,9 @@ class TranscriptionService:
         try:
             ts = get_speech_timestamps(
                     audio_16k_mono, 
-                    self.vad_model,  # ✅ This is fine, using the loaded model
+                    self.vad_model,
                     sampling_rate=16000,
-                    threshold=0.3,  # ✅ ADD THESE PARAMETERS
+                    threshold=0.3,
                     min_speech_duration_ms=250,
                     min_silence_duration_ms=2000,
                     speech_pad_ms=500,
@@ -100,7 +98,6 @@ class TranscriptionService:
             norm = []
             for seg in ts:
                 if isinstance(seg, dict) and ('start' in seg) and ('end' in seg):
-                    # Ensure seconds (float)
                     norm.append({'start': float(seg['start']), 'end': float(seg['end'])})
                 else:
                     logger.warning("Skipping malformed VAD segment: %s", seg)
@@ -116,6 +113,120 @@ class TranscriptionService:
             logger.error(f"generate_speech_timestamps failed: {e}")
             raise
 
+    # ========== NEW METHOD: VAD vs Transcription Comparison ==========
+    def _compare_vad_vs_transcription(
+        self,
+        vad_segments: List[Dict],
+        transcribed_results: List[Dict]
+    ) -> Dict:
+        """
+        Compare VAD detected speech vs what was actually transcribed
+        
+        Args:
+            vad_segments: Raw VAD output [{'start': float, 'end': float}, ...]
+            transcribed_results: Transcription results [{'start_timestamp': float, 'end_timestamp': float, ...}, ...]
+        
+        Returns:
+            Dict with coverage metrics
+        """
+        if not vad_segments:
+            logger.info("No VAD segments to compare")
+            return {'coverage_percent': 0, 'status': 'no_vad_segments'}
+        
+        if not transcribed_results:
+            logger.warning("No transcription results to compare!")
+            total_vad = sum(s['end'] - s['start'] for s in vad_segments)
+            return {
+                'vad_detected_duration': total_vad,
+                'transcribed_duration': 0,
+                'coverage_percent': 0,
+                'missed_speech_duration': total_vad,
+                'status': 'nothing_transcribed'
+            }
+        
+        # Convert transcription results to same format as VAD
+        transcribed_segments = [
+            {
+                'start': result['start_timestamp'],
+                'end': result['end_timestamp']
+            }
+            for result in transcribed_results
+        ]
+        
+        # Calculate totals
+        total_vad_duration = sum(seg['end'] - seg['start'] for seg in vad_segments)
+        total_transcribed_duration = sum(seg['end'] - seg['start'] for seg in transcribed_segments)
+        
+        # Find how much of VAD-detected speech was actually transcribed
+        covered_duration = 0
+        missed_segments = []
+        
+        for vad_seg in vad_segments:
+            vad_duration = vad_seg['end'] - vad_seg['start']
+            seg_covered = 0
+            
+            # Check overlap with all transcribed segments
+            for trans_seg in transcribed_segments:
+                overlap_start = max(vad_seg['start'], trans_seg['start'])
+                overlap_end = min(vad_seg['end'], trans_seg['end'])
+                overlap = max(0, overlap_end - overlap_start)
+                seg_covered += overlap
+            
+            covered_duration += seg_covered
+            
+            # If less than 50% of this VAD segment was transcribed, it's likely missed
+            if seg_covered < vad_duration * 0.5:
+                missed_segments.append({
+                    'start': vad_seg['start'],
+                    'end': vad_seg['end'],
+                    'duration': vad_duration,
+                    'covered': seg_covered,
+                    'coverage_ratio': seg_covered / vad_duration if vad_duration > 0 else 0
+                })
+        
+        missed_duration = total_vad_duration - covered_duration
+        coverage_percent = (covered_duration / total_vad_duration * 100) if total_vad_duration > 0 else 0
+        missed_percent = (missed_duration / total_vad_duration * 100) if total_vad_duration > 0 else 0
+        
+        # Log results
+        logger.info(f"="*60)
+        logger.info(f"VAD vs TRANSCRIPTION COMPARISON")
+        logger.info(f"="*60)
+        logger.info(f"VAD Detected Speech:    {total_vad_duration:.2f}s ({len(vad_segments)} segments)")
+        logger.info(f"Actually Transcribed:   {total_transcribed_duration:.2f}s ({len(transcribed_segments)} chunks)")
+        logger.info(f"Speech Coverage:        {coverage_percent:.2f}%")
+        logger.info(f"Missed Speech:          {missed_duration:.2f}s ({missed_percent:.2f}%)")
+        
+        if missed_percent < 2:
+            logger.info(f"✅ EXCELLENT: < 2% speech missed")
+        elif missed_percent < 5:
+            logger.info(f"✅ GOOD: < 5% speech missed")
+        elif missed_percent < 10:
+            logger.warning(f"⚠️ FAIR: 5-10% speech missed - consider lowering VAD threshold to 0.25")
+        else:
+            logger.warning(f"❌ POOR: > 10% speech missed - VAD parameters need adjustment!")
+        
+        if missed_segments:
+            logger.info(f"Missed segments: {len(missed_segments)}")
+            # Log top 3 missed segments
+            sorted_missed = sorted(missed_segments, key=lambda x: x['duration'], reverse=True)[:3]
+            for i, seg in enumerate(sorted_missed, 1):
+                logger.info(f"  {i}. {seg['start']:.2f}s - {seg['end']:.2f}s ({seg['duration']:.2f}s) "
+                           f"- {seg['coverage_ratio']*100:.0f}% covered")
+        
+        logger.info(f"="*60)
+        
+        return {
+            'vad_detected_duration': total_vad_duration,
+            'transcribed_duration': total_transcribed_duration,
+            'covered_duration': covered_duration,
+            'coverage_percent': coverage_percent,
+            'missed_duration': missed_duration,
+            'missed_percent': missed_percent,
+            'missed_segments': missed_segments,
+            'status': 'analyzed'
+        }
+
     async def _speech_timestamps_chunking_algorithm(
         self,
         speech_timestamps: List[Dict],
@@ -123,10 +234,10 @@ class TranscriptionService:
         min_duration: float = SpeechTimestampsChunking.min_duration,
         gap_threshold: float = SpeechTimestampsChunking.gap_threshold,
         short_chunk_fallback: float = SpeechTimestampsChunking.short_chunk_fallback,
-        padding: float = 0.2,  # Add padding around speech segments
-        overlap: float = 0.1,  # Add overlap between chunks
+        padding: float = 0.2,
+        overlap: float = 0.1,
         verbose: bool = SpeechTimestampsChunking.verbose,
-        audio_duration: float = None  # Total audio duration for boundary checks
+        audio_duration: float = None
     ) -> List[Dict]:
         """
         Merge VAD segments into chunks obeying duration and gap rules.
@@ -136,19 +247,16 @@ class TranscriptionService:
             if not speech_timestamps:
                 return []
 
-            # Defensive check on shape
             if not isinstance(speech_timestamps, list):
                 raise TypeError(f"speech_timestamps must be a list, got {type(speech_timestamps)}")
 
             if speech_timestamps and not isinstance(speech_timestamps[0], dict):
                 raise TypeError(f"speech_timestamps items must be dict, got {type(speech_timestamps[0])}")
 
-            # Step 1: Add padding to all segments and ensure they're valid
+            # Step 1: Add padding to all segments
             padded_segments = []
             for seg in speech_timestamps:
                 seg = seg.copy()
-                
-                # Add padding
                 seg['start'] = max(0, seg['start'] - padding)
                 if audio_duration:
                     seg['end'] = min(audio_duration, seg['end'] + padding)
@@ -174,15 +282,12 @@ class TranscriptionService:
                 gap = seg['start'] - current['end']
                 combined_duration = seg['end'] - current['start']
 
-                # Merge if gap is small enough and combined duration is acceptable
                 if gap <= gap_threshold and combined_duration <= max_duration:
                     current['end'] = seg['end']
                 else:
-                    # Finalize current chunk
                     chunks.append(current)
                     current = seg.copy()
 
-            # Don't forget the last chunk
             if current:
                 chunks.append(current)
 
@@ -193,13 +298,11 @@ class TranscriptionService:
                 chunk = chunks[i].copy()
                 chunk_duration = chunk['end'] - chunk['start']
                 
-                # If chunk is too short, try to merge with next chunk
                 while chunk_duration < min_duration and i + 1 < len(chunks):
                     next_chunk = chunks[i + 1]
                     gap = next_chunk['start'] - chunk['end']
                     
-                    # Merge if reasonable
-                    if gap <= max_duration:  # More lenient merging for short chunks
+                    if gap <= max_duration:
                         if verbose:
                             print(f"Merging short chunk [{chunk['start']:.2f}, {chunk['end']:.2f}] "
                                 f"with next [{next_chunk['start']:.2f}, {next_chunk['end']:.2f}]")
@@ -209,7 +312,6 @@ class TranscriptionService:
                     else:
                         break
                 
-                # If still too short but meets fallback threshold, keep it
                 if chunk_duration < min_duration:
                     if chunk_duration >= short_chunk_fallback:
                         if verbose:
@@ -217,10 +319,9 @@ class TranscriptionService:
                                 f"({chunk_duration:.2f}s) - meets fallback threshold")
                         merged_chunks.append(chunk)
                     else:
-                        # CRITICAL: Don't drop - try to merge with previous chunk
                         if merged_chunks:
                             prev_gap = chunk['start'] - merged_chunks[-1]['end']
-                            if prev_gap <= max_duration * 2:  # Very lenient for rescuing short chunks
+                            if prev_gap <= max_duration * 2:
                                 if verbose:
                                     print(f"Rescuing short chunk [{chunk['start']:.2f}, {chunk['end']:.2f}] "
                                         f"by merging with previous")
@@ -231,7 +332,6 @@ class TranscriptionService:
                                         f"{chunk['end']:.2f}] ({chunk_duration:.2f}s) - isolated segment")
                                 merged_chunks.append(chunk)
                         else:
-                            # First chunk and too short - keep it anyway
                             if verbose:
                                 print(f"WARNING: Keeping very short first chunk [{chunk['start']:.2f}, "
                                     f"{chunk['end']:.2f}] ({chunk_duration:.2f}s)")
@@ -241,16 +341,14 @@ class TranscriptionService:
                 
                 i += 1
 
-            # Step 4: Add overlap between chunks (helps with boundary issues)
+            # Step 4: Add overlap between chunks
             final_chunks = []
             for i, chunk in enumerate(merged_chunks):
                 chunk = chunk.copy()
                 
-                # Add overlap with previous chunk
                 if i > 0 and overlap > 0:
                     chunk['start'] = max(merged_chunks[i-1]['end'] - overlap, chunk['start'])
                 
-                # Extend into next chunk
                 if i < len(merged_chunks) - 1 and overlap > 0:
                     chunk['end'] = min(merged_chunks[i+1]['start'] + overlap, chunk['end'])
                 
@@ -275,11 +373,10 @@ class TranscriptionService:
         start_timestamp: float,
         end_timestamp: float,
         sampling_rate: int = TranscriptModel.expected_sampling_rate,
-        silence_duration: float = 0.1,  # REDUCED: Minimal silence
-        leading_extension: float = 0.0,  # REMOVED: Padding already in chunk timestamps
-        trailing_extension: float = 0.0,  # REMOVED: Padding already in chunk timestamps
+        silence_duration: float = 0.1,
+        leading_extension: float = 0.0,
+        trailing_extension: float = 0.0,
     ) -> Dict:
-
 
         def normalize_rms(a: np.ndarray, target_dBFS: float = -20.0) -> np.ndarray:
             rms = np.sqrt(np.mean(a ** 2))
@@ -316,13 +413,9 @@ class TranscriptionService:
             if not audio_chunk_data:
                 return None
 
-            # Prepare processor and model (CTranslate2 variant)
             ct2_model = SharedResources.whisper_model()
-
-            # Prepare audio features for CTranslate2
             audio_chunk = audio_chunk_data['audio_chunk']
-            segments, info = ct2_model.transcribe(audio_chunk, beam_size=5, language = "hi", vad_filter=False) # NOTE : If something breaks check here 
-            # Decode the output tokens to text
+            segments, info = ct2_model.transcribe(audio_chunk, beam_size=5, language="hi", vad_filter=False)
             text = ' '.join([s.text for s in segments])
 
             return {
@@ -340,17 +433,15 @@ class TranscriptionService:
         This function analyzes the stereo calls
         """
         try:
-            # self.downsampled_audio is a DownsampleOutput with .downsampled_left_channel / .downsampled_right_channel
             left = self.downsampled_audio.downsampled_left_channel
             right = self.downsampled_audio.downsampled_right_channel
 
-            # Ensure both sides are 16k mono arrays (some splitters may preserve shapes differently)
             left_16k, _ = self._ensure_16k_mono(left, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
             right_16k, _ = self._ensure_16k_mono(right, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
 
-            # Generate speech timestamps
-            left_ts_task = self.generate_speech_timestamps(left)
-            right_ts_task = self.generate_speech_timestamps(right)
+            # Generate speech timestamps - SAVE THESE!
+            left_ts_task = self.generate_speech_timestamps(left_16k)
+            right_ts_task = self.generate_speech_timestamps(right_16k)
             left_ts, right_ts = await asyncio.gather(left_ts_task, right_ts_task)
 
             if not left_ts and not right_ts:
@@ -361,7 +452,7 @@ class TranscriptionService:
                     sampling_rate=TranscriptModel.expected_sampling_rate
                 )
 
-            # Chunking (each returns List[Dict] or None)
+            # Chunking
             left_chunks_task = self._speech_timestamps_chunking_algorithm(left_ts) if left_ts else asyncio.sleep(0, result=[])
             right_chunks_task = self._speech_timestamps_chunking_algorithm(right_ts) if right_ts else asyncio.sleep(0, result=[])
             left_chunks, right_chunks = await asyncio.gather(left_chunks_task, right_chunks_task)
@@ -369,7 +460,7 @@ class TranscriptionService:
             left_chunks = left_chunks or []
             right_chunks = right_chunks or []
 
-            # ADD COVERAGE LOGGING HERE ⬇️
+            # Coverage logging
             audio_duration = len(left_16k) / 16000
             if left_chunks:
                 left_coverage = sum(c['end'] - c['start'] for c in left_chunks) / audio_duration * 100
@@ -400,6 +491,12 @@ class TranscriptionService:
             left_results = [r for r in (left_results or []) if r is not None]
             right_results = [r for r in (right_results or []) if r is not None]
 
+            # ========== NEW: Compare VAD vs Transcription ==========
+            if left_ts and left_results:
+                self._compare_vad_vs_transcription(left_ts, left_results)
+            if right_ts and right_results:
+                self._compare_vad_vs_transcription(right_ts, right_results)
+
             if not left_results and right_results:
                 return TranscriptionServiceOutput(
                     transcript=right_results,
@@ -428,7 +525,6 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Error transcribing stereo calls : {e}")
-
             raise
 
     async def _transcribe_mono_calls(self):
@@ -436,12 +532,12 @@ class TranscriptionService:
         This function transcribes mono calls
         """
         try:
-            # Ensure 16k mono BEFORE everything (8 kHz input was your crash source)
             mono_16k, _ = self._ensure_16k_mono(self.downsampled_audio, self.sr)
 
-            # 1) VAD
-            ts = await self.generate_speech_timestamps(mono_16k)  # List[Dict]
-            if not ts:
+            # 1) VAD - SAVE THIS!
+            vad_segments = await self.generate_speech_timestamps(mono_16k)
+            
+            if not vad_segments:
                 return TranscriptionServiceOutput(
                     transcript=[],
                     status=TranscriptStatus.SILENT_AUDIO,
@@ -452,12 +548,12 @@ class TranscriptionService:
             # 2) Chunking
             audio_duration = len(mono_16k) / 16000
             chunked = await self._speech_timestamps_chunking_algorithm(
-                ts, 
+                vad_segments,  # Pass VAD segments
                 audio_duration=audio_duration,
-                verbose=True  # Enable logging
+                verbose=True
             )
 
-            # Log coverage for debugging
+            # Log coverage
             if chunked:
                 total_covered = sum(c['end'] - c['start'] for c in chunked)
                 coverage = (total_covered / audio_duration) * 100
@@ -465,7 +561,6 @@ class TranscriptionService:
                 
                 if coverage < 90:
                     logger.warning(f"LOW COVERAGE: Only {coverage:.1f}% of audio will be transcribed!")
-                    logger.warning(f"Consider adjusting VAD parameters or disabling VAD")
 
             if not chunked:
                 return TranscriptionServiceOutput(
@@ -488,10 +583,14 @@ class TranscriptionService:
                     sampling_rate=TranscriptModel.mono_sampling_rate
                 )
 
-            # 4) Transcribe (FIXED: use audio_chunks, not left_channel_chunks)
+            # 4) Transcribe
             transcribe_audio_chunks_tasks = [self._transcribe_audio(chunk, speaker_label="") for chunk in self.audio_chunks]
             transcription_results = await asyncio.gather(*transcribe_audio_chunks_tasks)
             transcription_results = [r for r in (transcription_results or []) if r is not None]
+
+            # ========== NEW: Compare VAD vs Transcription ==========
+            if vad_segments and transcription_results:
+                self._compare_vad_vs_transcription(vad_segments, transcription_results)
 
             return TranscriptionServiceOutput(
                 transcript=transcription_results,
@@ -502,35 +601,23 @@ class TranscriptionService:
 
         except Exception as e:
             logger.error(f"Error transcribing mono audio : {e}")
-
             raise
 
     async def process(self) -> TranscriptionServiceOutput:
         """
         This function processes the audio file
         """
-
-        # 1. Check if there's a need for downsampling
-    
-        # 1.1 If the audio is 16k stereo, no resample needed
         if self.sr == TranscriptModel.expected_sampling_rate and self.channels == TranscriptModel.expected_channels:
-            # Split but keep native 16k
             self.audio_split_channels = split_channels(audio=self.audio)
-
-            # Make it match what downstream expects
             self.downsampled_audio = DownsampleOutput(
                 downsampled_left_channel=self.audio_split_channels.left_channel,
                 downsampled_right_channel=self.audio_split_channels.right_channel
             )
-
             self.raw_transcripts = await self._transcribe_stereo_calls()
             return self.raw_transcripts
 
         elif self.sr > TranscriptModel.expected_sampling_rate and self.channels == TranscriptModel.expected_channels:
-            # Need for downsampling and splitting to 16k
             self.audio_split_channels = split_channels(audio=self.audio)
-
-            # Use your existing util to resample to 16k per channel
             self.downsampled_audio = downsample_audio(
                 audio_left_channel=self.audio_split_channels.left_channel,
                 audio_right_channel=self.audio_split_channels.right_channel,
@@ -549,8 +636,7 @@ class TranscriptionService:
             return self.raw_transcripts
 
         elif self.sr < TranscriptModel.expected_sampling_rate and self.channels < TranscriptModel.expected_channels:
-            # Mono and lower than 16k — handle as mono and upsample inside the mono pipeline
-            self.downsampled_audio = self.audio  # raw mono; _ensure_16k_mono() will fix SR
+            self.downsampled_audio = self.audio
             self.raw_transcripts = await self._transcribe_mono_calls()
             return self.raw_transcripts
 
