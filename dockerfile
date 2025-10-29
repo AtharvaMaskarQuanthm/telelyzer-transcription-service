@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -6,34 +6,28 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install system dependencies for librosa, torchaudio, etc.
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends \
-       build-essential \
-       libsndfile1 \
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    libsndfile1 \
+    ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-
-RUN apt-get update && apt-get install -y ffmpeg
-
-# Copy dependency files first to leverage caching
+# Copy dependency files
 COPY requirements.txt .
 
-RUN pip install --no-cache-dir --upgrade pip \
-    && pip install --no-cache-dir -r requirements.txt
+# Install cuDNN and cublas for CTranslate2
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir nvidia-cudnn-cu12 nvidia-cublas-cu12 && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Set library paths for cuDNN
+ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:$LD_LIBRARY_PATH
 
 # Copy application code
 COPY app/ ./app/
 COPY main.py .
 
-# Create non-root user
-RUN adduser --disabled-password --gecos '' --shell /bin/bash user \
-    && chown -R user:user /app
-USER user
-
 EXPOSE 8000
-
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:8000/docs', timeout=5)" || exit 1
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
