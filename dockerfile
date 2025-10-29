@@ -2,12 +2,16 @@ FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PYTHONPATH=/app
+    PYTHONPATH=/app \
+    DEBIAN_FRONTEND=noninteractive
 
 WORKDIR /app
 
-# Install system dependencies
+# Install Python and system dependencies (Python 3.10 comes with Ubuntu 22.04)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    python3-dev \
     build-essential \
     libsndfile1 \
     ffmpeg \
@@ -16,10 +20,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy dependency files
 COPY requirements.txt .
 
-# Install cuDNN and cublas for CTranslate2
+# Install Python packages
+RUN pip3 install --no-cache-dir --upgrade pip && \
+    pip3 install --no-cache-dir -r requirements.txt
 
 # Set library paths for cuDNN
-# ENV LD_LIBRARY_PATH=/usr/local/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/lib/python3.12/site-packages/nvidia/cublas/lib:$LD_LIBRARY_PATH
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 
 # Copy application code
 COPY app/ ./app/
