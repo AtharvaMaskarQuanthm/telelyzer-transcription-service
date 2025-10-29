@@ -13,6 +13,14 @@ RUN apt-get update \
        libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Add NVIDIA package repositories
+RUN wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+RUN sudo dpkg -i cuda-keyring_1.1-1_all.deb
+RUN sudo apt-get update
+
+# Install cuDNN
+RUN sudo apt-get install libcudnn9-cuda-12
+
 RUN apt-get update && apt-get install -y ffmpeg
 
 # Copy dependency files first to leverage caching
