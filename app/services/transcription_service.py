@@ -77,29 +77,6 @@ class TranscriptionService:
 
         return waveform, sr
 
-    async def generate_speech_timestamps(self, audio_16k_mono: np.ndarray) -> List[Dict]:
-        """
-        Wrapper over Silero VAD. Expects 16 kHz mono array of float32.
-        Returns a List[{'start': float, 'end': float}] in seconds.
-        """
-        try:
-            ts = get_speech_timestamps(audio_16k_mono, self.vad_model, sampling_rate=16000, return_seconds=True)
-            if not isinstance(ts, list):
-                logger.error("VAD returned non-list: %s", type(ts))
-                return []
-
-            norm = []
-            for seg in ts:
-                if isinstance(seg, dict) and ('start' in seg) and ('end' in seg):
-                    # Ensure seconds (float)
-                    norm.append({'start': float(seg['start']), 'end': float(seg['end'])})
-                else:
-                    logger.warning("Skipping malformed VAD segment: %s", seg)
-            return norm
-        except Exception as e:
-            logger.error(f"generate_speech_timestamps failed: {e}")
-            raise
-
     async def _speech_timestamps_chunking_algorithm(
         self,
         speech_timestamps: List[Dict],
@@ -107,7 +84,10 @@ class TranscriptionService:
         min_duration: float = SpeechTimestampsChunking.min_duration,
         gap_threshold: float = SpeechTimestampsChunking.gap_threshold,
         short_chunk_fallback: float = SpeechTimestampsChunking.short_chunk_fallback,
-        verbose: bool = SpeechTimestampsChunking.verbose
+        padding: float = 0.2,  # Add padding around speech segments
+        overlap: float = 0.1,  # Add overlap between chunks
+        verbose: bool = SpeechTimestampsChunking.verbose,
+        audio_duration: float = None  # Total audio duration for boundary checks
     ) -> List[Dict]:
         """
         Merge VAD segments into chunks obeying duration and gap rules.
@@ -124,65 +104,127 @@ class TranscriptionService:
             if speech_timestamps and not isinstance(speech_timestamps[0], dict):
                 raise TypeError(f"speech_timestamps items must be dict, got {type(speech_timestamps[0])}")
 
-            chunks = []
-            current = None
-
+            # Step 1: Add padding to all segments and ensure they're valid
+            padded_segments = []
             for seg in speech_timestamps:
                 seg = seg.copy()
+                
+                # Add padding
+                seg['start'] = max(0, seg['start'] - padding)
+                if audio_duration:
+                    seg['end'] = min(audio_duration, seg['end'] + padding)
+                else:
+                    seg['end'] = seg['end'] + padding
+                
                 seg_duration = seg['end'] - seg['start']
                 if seg_duration <= 0:
                     if verbose:
                         print(f"Skipping non-positive duration seg: {seg}")
                     continue
+                    
+                padded_segments.append(seg)
+            
+            if not padded_segments:
+                return []
 
-                if current is None:
-                    current = seg
-                    continue
+            # Step 2: Merge segments into chunks
+            chunks = []
+            current = padded_segments[0].copy()
 
-                gap = round(seg['start'] - current['end'], 6)
+            for seg in padded_segments[1:]:
+                gap = seg['start'] - current['end']
                 combined_duration = seg['end'] - current['start']
 
+                # Merge if gap is small enough and combined duration is acceptable
                 if gap <= gap_threshold and combined_duration <= max_duration:
                     current['end'] = seg['end']
-                elif combined_duration <= min_duration and gap <= gap_threshold:
-                    # still merge small additions
-                    current['end'] = seg['end']
                 else:
-                    current_duration = current['end'] - current['start']
+                    # Finalize current chunk
+                    chunks.append(current)
+                    current = seg.copy()
 
-                    if current_duration >= min_duration:
-                        chunks.append(current)
-                    else:
-                        if chunks and (current['start'] - chunks[-1]['end']) <= gap_threshold:
-                            if verbose:
-                                print(f"Backward-merged short chunk [{current['start']}, {current['end']}] into previous.")
-                            chunks[-1]['end'] = current['end']
-                        elif current_duration >= short_chunk_fallback:
-                            chunks.append(current)
-                            if verbose:
-                                print(f"Preserved short chunk [{current['start']}, {current['end']}]")
-                        else:
-                            if verbose:
-                                print(f"Dropped too-short chunk [{current['start']}, {current['end']}]")
-
-                    current = seg
-
+            # Don't forget the last chunk
             if current:
-                final_duration = current['end'] - current['start']
-                if final_duration >= min_duration:
-                    chunks.append(current)
-                elif chunks and (current['start'] - chunks[-1]['end']) <= gap_threshold:
-                    chunks[-1]['end'] = current['end']
-                    if verbose:
-                        print(f"Final chunk backward-merged [{current['start']}, {current['end']}]")
-                elif final_duration >= short_chunk_fallback:
-                    chunks.append(current)
-                    if verbose:
-                        print(f"Final short chunk preserved [{current['start']}, {current['end']}]")
-                elif verbose:
-                    print(f"Final chunk dropped [{current['start']}, {current['end']}]")
+                chunks.append(current)
 
-            return chunks
+            # Step 3: Ensure minimum duration by merging small chunks
+            merged_chunks = []
+            i = 0
+            while i < len(chunks):
+                chunk = chunks[i].copy()
+                chunk_duration = chunk['end'] - chunk['start']
+                
+                # If chunk is too short, try to merge with next chunk
+                while chunk_duration < min_duration and i + 1 < len(chunks):
+                    next_chunk = chunks[i + 1]
+                    gap = next_chunk['start'] - chunk['end']
+                    
+                    # Merge if reasonable
+                    if gap <= max_duration:  # More lenient merging for short chunks
+                        if verbose:
+                            print(f"Merging short chunk [{chunk['start']:.2f}, {chunk['end']:.2f}] "
+                                f"with next [{next_chunk['start']:.2f}, {next_chunk['end']:.2f}]")
+                        chunk['end'] = next_chunk['end']
+                        i += 1
+                        chunk_duration = chunk['end'] - chunk['start']
+                    else:
+                        break
+                
+                # If still too short but meets fallback threshold, keep it
+                if chunk_duration < min_duration:
+                    if chunk_duration >= short_chunk_fallback:
+                        if verbose:
+                            print(f"Keeping short chunk [{chunk['start']:.2f}, {chunk['end']:.2f}] "
+                                f"({chunk_duration:.2f}s) - meets fallback threshold")
+                        merged_chunks.append(chunk)
+                    else:
+                        # CRITICAL: Don't drop - try to merge with previous chunk
+                        if merged_chunks:
+                            prev_gap = chunk['start'] - merged_chunks[-1]['end']
+                            if prev_gap <= max_duration * 2:  # Very lenient for rescuing short chunks
+                                if verbose:
+                                    print(f"Rescuing short chunk [{chunk['start']:.2f}, {chunk['end']:.2f}] "
+                                        f"by merging with previous")
+                                merged_chunks[-1]['end'] = chunk['end']
+                            else:
+                                if verbose:
+                                    print(f"WARNING: Forced to keep very short chunk [{chunk['start']:.2f}, "
+                                        f"{chunk['end']:.2f}] ({chunk_duration:.2f}s) - isolated segment")
+                                merged_chunks.append(chunk)
+                        else:
+                            # First chunk and too short - keep it anyway
+                            if verbose:
+                                print(f"WARNING: Keeping very short first chunk [{chunk['start']:.2f}, "
+                                    f"{chunk['end']:.2f}] ({chunk_duration:.2f}s)")
+                            merged_chunks.append(chunk)
+                else:
+                    merged_chunks.append(chunk)
+                
+                i += 1
+
+            # Step 4: Add overlap between chunks (helps with boundary issues)
+            final_chunks = []
+            for i, chunk in enumerate(merged_chunks):
+                chunk = chunk.copy()
+                
+                # Add overlap with previous chunk
+                if i > 0 and overlap > 0:
+                    chunk['start'] = max(merged_chunks[i-1]['end'] - overlap, chunk['start'])
+                
+                # Extend into next chunk
+                if i < len(merged_chunks) - 1 and overlap > 0:
+                    chunk['end'] = min(merged_chunks[i+1]['start'] + overlap, chunk['end'])
+                
+                final_chunks.append(chunk)
+
+            if verbose:
+                print(f"\nChunking summary:")
+                print(f"  Input segments: {len(speech_timestamps)}")
+                print(f"  Output chunks: {len(final_chunks)}")
+                total_speech = sum(c['end'] - c['start'] for c in final_chunks)
+                print(f"  Total speech duration: {total_speech:.2f}s")
+
+            return final_chunks
 
         except Exception as e:
             logger.error(f"Error in Speech Timestamps algorithm: {e}")
