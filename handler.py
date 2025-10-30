@@ -1,11 +1,11 @@
-# handler.py - This goes in your Docker container
+# handler.py - Updated with librosa for base64 option
 import runpod
 from typing import Dict, Any
 from dataclasses import asdict
 import base64
-import io
 import tempfile
 import os
+import librosa
 
 from app.services.transcription_service import TranscriptionService
 from app.models.transcription_service import TranscriptStatus
@@ -65,13 +65,26 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                 temp_file_path = temp_file.name
             
             try:
-                # Process the audio file
-                transcription_service = TranscriptionService(audio_url=temp_file_path)
+                # Load the audio with librosa
+                logger.info(f"Loading audio from temp file: {temp_file_path}")
+                audio_waveform, sampling_rate = librosa.load(temp_file_path, sr=None)
+                
+                logger.info(f"Loaded audio: {len(audio_waveform)} samples at {sampling_rate}Hz")
+                
+                # Create AudioWaveFormFormat object
+                audio_format = AudioWaveFormFormat(
+                    audio_waveform=audio_waveform.tolist(),
+                    sampling_rate=int(sampling_rate)
+                )
+                
+                # Use the waveform approach
+                transcription_service = TranscriptionService(audio_waveform=audio_format)
                 transcripts = await transcription_service.process()
             finally:
                 # Clean up temp file
                 if os.path.exists(temp_file_path):
                     os.remove(temp_file_path)
+                    logger.info("Cleaned up temporary file")
         
         else:
             return {
