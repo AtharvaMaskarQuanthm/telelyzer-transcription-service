@@ -20,9 +20,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy dependency files
 COPY requirements.txt .
 
-# Install Python packages
+# Install Python packages (including runpod)
 RUN pip3 install --no-cache-dir --upgrade pip && \
-    pip3 install --no-cache-dir -r requirements.txt
+    pip3 install --no-cache-dir -r requirements.txt && \
+    pip3 install --no-cache-dir runpod
 
 # Set library paths for cuDNN
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
@@ -30,7 +31,7 @@ ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 # Copy application code
 COPY app/ ./app/
 COPY main.py .
+COPY handler.py .
 
-EXPOSE 8000
-
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Changed: Run handler.py instead of uvicorn
+CMD ["python3", "-u", "handler.py"]
