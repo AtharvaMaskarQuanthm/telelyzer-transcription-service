@@ -639,6 +639,16 @@ class TranscriptionService:
             self.downsampled_audio = self.audio
             self.raw_transcripts = await self._transcribe_mono_calls()
             return self.raw_transcripts
+        
+        elif self.sr > TranscriptModel.expected_sampling_rate and self.channels < TranscriptModel.expected_channels:
+            self.downsampled_audio = downsample_audio(
+                audio_left_channel=self.audio_split_channels.left_channel,
+                audio_right_channel=self.audio_split_channels.right_channel,
+                original_sampling_rate=self.sr
+            )
+
+            self.raw_transcripts = await self._transcribe_mono_calls()
+            return self.raw_transcripts
 
         else:
             logger.error(f"Unsupported file format")
