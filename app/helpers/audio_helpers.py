@@ -1,14 +1,17 @@
 import librosa
 import numpy as np
+import os
 import time
 
 from dataclasses import dataclass
+from dotenv import load_dotenv
 from langsmith import traceable
 
 from app.models.transcription_service import TranscriptModel
 from app.utils.logger import get_logger
 
 logger = get_logger()
+load_dotenv()
 
 @dataclass
 class SplitChannelsOutput:

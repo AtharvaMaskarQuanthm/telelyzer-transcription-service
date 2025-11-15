@@ -1,10 +1,12 @@
 import asyncio
 import ctranslate2
 import librosa
+import os
 import torch
 
 import numpy as np
 
+from dotenv import load_dotenv
 from silero_vad import get_speech_timestamps
 from langsmith import traceable
 from typing import Dict, List, Literal, Optional, Tuple
@@ -21,6 +23,7 @@ from app.utils.logger import get_logger
 from app.utils.shared_resources import SharedResources
 
 logger = get_logger()
+load_dotenv()
 
 class TranscriptionService:
     """

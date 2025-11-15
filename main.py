@@ -1,3 +1,7 @@
+import os
+from dotenv import load_dotenv 
+
+
 from dataclasses import asdict
 from fastapi import FastAPI, Query, HTTPException
 from langsmith import traceable
@@ -14,6 +18,7 @@ from app.utils.logger import get_logger
 import uvicorn
 app = FastAPI()
 
+load_dotenv()
 # Response model - Create as Pydantic model, not inheriting from dataclass
 class TranscriptionResponse(BaseModel):
     transcript: List[dict]  # Adjust based on your actual structure
@@ -46,7 +51,6 @@ async def health_check():
 @app.get("/transcribe-url", response_model=TranscriptionResponse)
 @traceable(run_name="Transcription Service")
 async def transcribe_url(url: str = Query(..., description="Audio file URL to transcribe")):
-    with traceable(run_name="Transcribe URL"):
         try:
             transcription_service = TranscriptionService(audio_url=url)
             transcripts = await transcription_service.process()
@@ -63,7 +67,6 @@ async def transcribe_url(url: str = Query(..., description="Audio file URL to tr
 @app.post("/transcribe-waveform", response_model=TranscriptionResponse)
 @traceable(run_name="Transcription Service")
 async def transcribe_waveform(request: TranscribeRequest):
-    with traceable(run_name="Transcribe Waveform"):
         try:
             # Create AudioWaveFormFormat object from request
             audio_format = AudioWaveFormFormat(

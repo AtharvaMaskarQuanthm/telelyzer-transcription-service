@@ -6,6 +6,7 @@ import os
 import librosa
 
 from dataclasses import asdict
+from dotenv import load_dotenv
 from typing import Dict, Any
 from langsmith import traceable
 
@@ -15,6 +16,7 @@ from app.models.audio import AudioWaveFormFormat
 from app.utils.logger import get_logger
 
 logger = get_logger()
+load_dotenv()
 
 @traceable
 async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
@@ -37,7 +39,6 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         
         # Option 1: URL-based transcription
         if "audio_url" in job_input:
-            with traceable(run_name="Transcribe URL"):
                 audio_url = job_input["audio_url"]
                 logger.info(f"Processing audio from URL: {audio_url}")
                 
@@ -46,7 +47,6 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         
         # Option 2: Waveform-based transcription
         elif "audio_waveform" in job_input and "sampling_rate" in job_input:
-            with traceable(run_name="Transcribe Waveform"):
                 logger.info("Processing audio from waveform")
                 
                 audio_format = AudioWaveFormFormat(
@@ -59,7 +59,6 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
         
         # Option 3: Base64 encoded audio file
         elif "audio_base64" in job_input:
-            with traceable(run_name="Transcribe Audio Base64"):
                 logger.info("Processing audio from base64 encoded file")
                 
                 # Decode base64 audio
