@@ -6,6 +6,7 @@ import torch
 import numpy as np
 
 from silero_vad import get_speech_timestamps
+from langsmith import traceable
 from typing import Dict, List, Literal, Optional, Tuple
 
 from app.exceptions.model_load_error import ModelLoadError
@@ -52,6 +53,7 @@ class TranscriptionService:
             raise
 
     # ---- HELPER FUNCTIONS
+    @traceable
     def _ensure_16k_mono(self, waveform: np.ndarray, sr: int) -> Tuple[np.ndarray, int]:
         """
         Return a mono, 16 kHz float32 waveform.
@@ -75,6 +77,7 @@ class TranscriptionService:
 
         return waveform, sr
     
+    @traceable
     async def generate_speech_timestamps(self, audio_16k_mono: np.ndarray) -> List[Dict]:
         """
         Wrapper over Silero VAD. Expects 16 kHz mono array of float32.
@@ -114,6 +117,7 @@ class TranscriptionService:
             raise
 
     # ========== NEW METHOD: VAD vs Transcription Comparison ==========
+    @traceable
     def _compare_vad_vs_transcription(
         self,
         vad_segments: List[Dict],
@@ -227,6 +231,7 @@ class TranscriptionService:
             'status': 'analyzed'
         }
 
+    @traceable
     async def _speech_timestamps_chunking_algorithm(
         self,
         speech_timestamps: List[Dict],
@@ -366,7 +371,8 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Error in Speech Timestamps algorithm: {e}")
             raise
-
+    
+    @traceable
     async def _split_audio(
         self,
         audio: np.ndarray,
@@ -407,7 +413,8 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Error splitting audio into chunks: {e}")
             raise
-
+    
+    @traceable
     async def _transcribe_audio(self, audio_chunk_data: dict, speaker_label: str = "") -> dict:
         try:
             if not audio_chunk_data:
@@ -427,7 +434,8 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Error translating audio using Whisper Module : {e}")
             raise
-        
+    
+    @traceable
     async def _transcribe_stereo_calls(self):
         """
         This function analyzes the stereo calls
@@ -526,7 +534,8 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Error transcribing stereo calls : {e}")
             raise
-
+    
+    @traceable
     async def _transcribe_mono_calls(self):
         """
         This function transcribes mono calls
@@ -602,7 +611,8 @@ class TranscriptionService:
         except Exception as e:
             logger.error(f"Error transcribing mono audio : {e}")
             raise
-
+    
+    @traceable
     async def process(self) -> TranscriptionServiceOutput:
         """
         This function processes the audio file

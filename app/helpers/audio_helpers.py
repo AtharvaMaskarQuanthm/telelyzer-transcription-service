@@ -3,6 +3,7 @@ import numpy as np
 import time
 
 from dataclasses import dataclass
+from langsmith import traceable
 
 from app.models.transcription_service import TranscriptModel
 from app.utils.logger import get_logger
@@ -18,8 +19,8 @@ class SplitChannelsOutput:
 class DownsampleOutput:
     downsampled_left_channel : np.ndarray
     downsampled_right_channel : np.ndarray
-    
 
+@traceable
 def split_channels(audio: np.ndarray) -> SplitChannelsOutput:
     """
     This helper function split the channels into 2 channels. 
@@ -36,6 +37,7 @@ def split_channels(audio: np.ndarray) -> SplitChannelsOutput:
         right_channel = audio[1]
     )
 
+@traceable
 def downsample_audio(audio_left_channel : np.ndarray, audio_right_channel : np.ndarray, original_sampling_rate : int) -> DownsampleOutput:
     
     start_time = time.time()

@@ -13,3 +13,4 @@ transformers
 ctranslate2
 faster-whisper
 hf_transfer
+langsmith
