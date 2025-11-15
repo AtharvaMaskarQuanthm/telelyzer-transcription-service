@@ -55,7 +55,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             
             # Option 1: URL-based transcription
             if "audio_url" in job_input:
-                with langfuse.start_as_current_observation(
+                with langfuse_client.start_as_current_observation(
                     as_type="span",
                     name="Process audio url",
                 ) as span:
@@ -69,7 +69,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             
             # Option 2: Waveform-based transcription
             elif "audio_waveform" in job_input and "sampling_rate" in job_input:
-                with langfuse.start_as_current_observation(
+                with langfuse_client.start_as_current_observation(
                     as_type="span",
                     name="Process audio url",
                 ) as span:
@@ -87,7 +87,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             
             # Option 3: Base64 encoded audio file
             elif "audio_base64" in job_input:
-                with langfuse.start_as_current_observation(
+                with langfuse_client.start_as_current_observation(
                     as_type="span",
                     name="Process audio url",
                 ) as span:
