@@ -110,10 +110,5 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             "success": False
         }
 
-@traceable
-def main():
-    # Start the serverless handler
-    runpod.serverless.start({"handler": handler})
 
-if __name__ == "__main__":
-    main()
+runpod.serverless.start({"handler": handler})
