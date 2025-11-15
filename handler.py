@@ -16,7 +16,7 @@ from app.utils.logger import get_logger
 
 logger = get_logger()
 
-@traceable(run_name="Transcription Service")
+@traceable()
 async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
     RunPod serverless handler for transcription.
