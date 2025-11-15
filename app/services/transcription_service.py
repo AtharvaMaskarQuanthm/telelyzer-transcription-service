@@ -504,8 +504,8 @@ class TranscriptionService:
 
             langfuse_client.update_current_span(
                 metadata={
-                    "num_left_chunks": len(left_chunks), 
-                    "num_right_chunks": len(right_chunks), 
+                    "num_left_chunk": len(left_chunks), 
+                    "num_right_chunk": len(right_chunks), 
                     "total_chunks": len(left_chunks) + len(right_chunks)
                 }
             )
