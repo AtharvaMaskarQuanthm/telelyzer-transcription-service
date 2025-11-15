@@ -9,6 +9,8 @@ import numpy as np
 from dotenv import load_dotenv
 from silero_vad import get_speech_timestamps
 from langsmith import traceable
+from langfuse import observe, propagate_attributes, get_client
+
 from typing import Dict, List, Literal, Optional, Tuple
 
 from app.exceptions.model_load_error import ModelLoadError
@@ -24,6 +26,8 @@ from app.utils.shared_resources import SharedResources
 
 logger = get_logger()
 load_dotenv()
+
+langfuse_client = get_client()
 
 class TranscriptionService:
     """
@@ -56,7 +60,6 @@ class TranscriptionService:
             raise
 
     # ---- HELPER FUNCTIONS
-    @traceable
     def _ensure_16k_mono(self, waveform: np.ndarray, sr: int) -> Tuple[np.ndarray, int]:
         """
         Return a mono, 16 kHz float32 waveform.
@@ -80,7 +83,7 @@ class TranscriptionService:
 
         return waveform, sr
     
-    @traceable
+    @observe(name="Generate Speech Timestamps")
     async def generate_speech_timestamps(self, audio_16k_mono: np.ndarray) -> List[Dict]:
         """
         Wrapper over Silero VAD. Expects 16 kHz mono array of float32.
@@ -120,7 +123,7 @@ class TranscriptionService:
             raise
 
     # ========== NEW METHOD: VAD vs Transcription Comparison ==========
-    @traceable
+    @observe(name="Compare VAD & Transcription")
     def _compare_vad_vs_transcription(
         self,
         vad_segments: List[Dict],
@@ -183,6 +186,7 @@ class TranscriptionService:
             
             # If less than 50% of this VAD segment was transcribed, it's likely missed
             if seg_covered < vad_duration * 0.5:
+
                 missed_segments.append({
                     'start': vad_seg['start'],
                     'end': vad_seg['end'],
@@ -196,6 +200,17 @@ class TranscriptionService:
         missed_percent = (missed_duration / total_vad_duration * 100) if total_vad_duration > 0 else 0
         
         # Log results
+        langfuse_client.update_current_observation(
+                    metadata={
+                        "total_vad_duration": total_vad_duration, 
+                        "total_vad_segments": vad_segments, 
+                        "total_transcribed_duration": total_transcribed_duration, 
+                        "total_transcribed_segments": transcribed_segments, 
+                        "speech_coverage_percentage": coverage_percent, 
+                        "missed_speech_duration": missed_duration, 
+                        "missed_speech_percentage": missed_percent
+                    }
+                )
         logger.info(f"="*60)
         logger.info(f"VAD vs TRANSCRIPTION COMPARISON")
         logger.info(f"="*60)
@@ -234,7 +249,7 @@ class TranscriptionService:
             'status': 'analyzed'
         }
 
-    @traceable
+    @observe(name="Speech Timestamp Chunking Algorithm")
     async def _speech_timestamps_chunking_algorithm(
         self,
         speech_timestamps: List[Dict],
@@ -375,7 +390,7 @@ class TranscriptionService:
             logger.error(f"Error in Speech Timestamps algorithm: {e}")
             raise
     
-    @traceable
+    @observe(name="Split Audio Channels")
     async def _split_audio(
         self,
         audio: np.ndarray,
@@ -417,7 +432,6 @@ class TranscriptionService:
             logger.error(f"Error splitting audio into chunks: {e}")
             raise
     
-    @traceable
     async def _transcribe_audio(self, audio_chunk_data: dict, speaker_label: str = "") -> dict:
         try:
             if not audio_chunk_data:
@@ -438,7 +452,7 @@ class TranscriptionService:
             logger.error(f"Error translating audio using Whisper Module : {e}")
             raise
     
-    @traceable
+    @observe(name="Transcribe Stereo Calls")
     async def _transcribe_stereo_calls(self):
         """
         This function analyzes the stereo calls
@@ -446,9 +460,12 @@ class TranscriptionService:
         try:
             left = self.downsampled_audio.downsampled_left_channel
             right = self.downsampled_audio.downsampled_right_channel
-
-            left_16k, _ = self._ensure_16k_mono(left, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
-            right_16k, _ = self._ensure_16k_mono(right, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="ensure audio is 16K mono",
+            ) as span:
+                left_16k, _ = self._ensure_16k_mono(left, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
+                right_16k, _ = self._ensure_16k_mono(right, TranscriptModel.expected_sampling_rate if self.sr is None else self.sr)
 
             # Generate speech timestamps - SAVE THESE!
             left_ts_task = self.generate_speech_timestamps(left_16k)
@@ -464,43 +481,54 @@ class TranscriptionService:
                 )
 
             # Chunking
-            left_chunks_task = self._speech_timestamps_chunking_algorithm(left_ts) if left_ts else asyncio.sleep(0, result=[])
-            right_chunks_task = self._speech_timestamps_chunking_algorithm(right_ts) if right_ts else asyncio.sleep(0, result=[])
-            left_chunks, right_chunks = await asyncio.gather(left_chunks_task, right_chunks_task)
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Speech Timestamp Chunking Algorithm",
+            ) as span:
+                left_chunks_task = self._speech_timestamps_chunking_algorithm(left_ts) if left_ts else asyncio.sleep(0, result=[])
+                right_chunks_task = self._speech_timestamps_chunking_algorithm(right_ts) if right_ts else asyncio.sleep(0, result=[])
+                left_chunks, right_chunks = await asyncio.gather(left_chunks_task, right_chunks_task)
 
-            left_chunks = left_chunks or []
-            right_chunks = right_chunks or []
+                left_chunks = left_chunks or []
+                right_chunks = right_chunks or []
 
-            # Coverage logging
-            audio_duration = len(left_16k) / 16000
-            if left_chunks:
-                left_coverage = sum(c['end'] - c['start'] for c in left_chunks) / audio_duration * 100
-                logger.info(f"Left channel coverage: {left_coverage:.1f}% ({len(left_chunks)} chunks)")
-            if right_chunks:
-                right_coverage = sum(c['end'] - c['start'] for c in right_chunks) / audio_duration * 100
-                logger.info(f"Right channel coverage: {right_coverage:.1f}% ({len(right_chunks)} chunks)")
+            langfuse_client.update_current_observation(
+                metadata={
+                    "num_left_chunks": len(left_chunks), 
+                    "num_right_chunks": len(right_chunks), 
+                    "total_chunks": len(left_chunks) + len(right_chunks)
+                }
+            )
 
             # Split into audio chunks
-            left_split_tasks = [self._split_audio(left_16k, c['start'], c['end']) for c in left_chunks]
-            right_split_tasks = [self._split_audio(right_16k, c['start'], c['end']) for c in right_chunks]
-            left_splits, right_splits = await asyncio.gather(
-                asyncio.gather(*left_split_tasks),
-                asyncio.gather(*right_split_tasks)
-            )
-            left_splits = [c for c in (left_splits or []) if c is not None]
-            right_splits = [c for c in (right_splits or []) if c is not None]
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Split Audio Chunks",
+            ) as span:
+                left_split_tasks = [self._split_audio(left_16k, c['start'], c['end']) for c in left_chunks]
+                right_split_tasks = [self._split_audio(right_16k, c['start'], c['end']) for c in right_chunks]
+                left_splits, right_splits = await asyncio.gather(
+                    asyncio.gather(*left_split_tasks),
+                    asyncio.gather(*right_split_tasks)
+                )
+                left_splits = [c for c in (left_splits or []) if c is not None]
+                right_splits = [c for c in (right_splits or []) if c is not None]
 
-            # Transcribe
-            left_tx_tasks = [self._transcribe_audio(c, speaker_label="Left Channel") for c in left_splits]
-            right_tx_tasks = [self._transcribe_audio(c, speaker_label="Right Channel") for c in right_splits]
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Transcribe Audio",
+            ) as span:
+                # Transcribe
+                left_tx_tasks = [self._transcribe_audio(c, speaker_label="Left Channel") for c in left_splits]
+                right_tx_tasks = [self._transcribe_audio(c, speaker_label="Right Channel") for c in right_splits]
 
-            left_results, right_results = await asyncio.gather(
-                asyncio.gather(*left_tx_tasks) if left_tx_tasks else asyncio.sleep(0, result=[]),
-                asyncio.gather(*right_tx_tasks) if right_tx_tasks else asyncio.sleep(0, result=[])
-            )
+                left_results, right_results = await asyncio.gather(
+                    asyncio.gather(*left_tx_tasks) if left_tx_tasks else asyncio.sleep(0, result=[]),
+                    asyncio.gather(*right_tx_tasks) if right_tx_tasks else asyncio.sleep(0, result=[])
+                )
 
-            left_results = [r for r in (left_results or []) if r is not None]
-            right_results = [r for r in (right_results or []) if r is not None]
+                left_results = [r for r in (left_results or []) if r is not None]
+                right_results = [r for r in (right_results or []) if r is not None]
 
             # ========== NEW: Compare VAD vs Transcription ==========
             if left_ts and left_results:
@@ -538,12 +566,14 @@ class TranscriptionService:
             logger.error(f"Error transcribing stereo calls : {e}")
             raise
     
-    @traceable
+    @observe(name="Transcribe Mono Calls")
     async def _transcribe_mono_calls(self):
         """
         This function transcribes mono calls
         """
         try:
+
+
             mono_16k, _ = self._ensure_16k_mono(self.downsampled_audio, self.sr)
 
             # 1) VAD - SAVE THIS!
@@ -559,11 +589,15 @@ class TranscriptionService:
 
             # 2) Chunking
             audio_duration = len(mono_16k) / 16000
-            chunked = await self._speech_timestamps_chunking_algorithm(
-                vad_segments,  # Pass VAD segments
-                audio_duration=audio_duration,
-                verbose=True
-            )
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Speech Timestamps Chunking Algorithm",
+            ) as span:
+                chunked = await self._speech_timestamps_chunking_algorithm(
+                    vad_segments,  # Pass VAD segments
+                    audio_duration=audio_duration,
+                    verbose=True
+                )
 
             # Log coverage
             if chunked:
@@ -583,9 +617,13 @@ class TranscriptionService:
                 )
 
             # 3) Split audio
-            audio_chunk_tasks = [self._split_audio(mono_16k, c['start'], c['end']) for c in chunked]
-            self.audio_chunks = await asyncio.gather(*audio_chunk_tasks)
-            self.audio_chunks = [c for c in (self.audio_chunks or []) if c is not None]
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Split Audio",
+            ) as span:
+                audio_chunk_tasks = [self._split_audio(mono_16k, c['start'], c['end']) for c in chunked]
+                self.audio_chunks = await asyncio.gather(*audio_chunk_tasks)
+                self.audio_chunks = [c for c in (self.audio_chunks or []) if c is not None]
 
             if not self.audio_chunks:
                 return TranscriptionServiceOutput(
@@ -596,9 +634,13 @@ class TranscriptionService:
                 )
 
             # 4) Transcribe
-            transcribe_audio_chunks_tasks = [self._transcribe_audio(chunk, speaker_label="") for chunk in self.audio_chunks]
-            transcription_results = await asyncio.gather(*transcribe_audio_chunks_tasks)
-            transcription_results = [r for r in (transcription_results or []) if r is not None]
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Transcribe Audio",
+            ) as span:
+                transcribe_audio_chunks_tasks = [self._transcribe_audio(chunk, speaker_label="") for chunk in self.audio_chunks]
+                transcription_results = await asyncio.gather(*transcribe_audio_chunks_tasks)
+                transcription_results = [r for r in (transcription_results or []) if r is not None]
 
             # ========== NEW: Compare VAD vs Transcription ==========
             if vad_segments and transcription_results:
@@ -615,49 +657,89 @@ class TranscriptionService:
             logger.error(f"Error transcribing mono audio : {e}")
             raise
     
-    @traceable
+    @observe
     async def process(self) -> TranscriptionServiceOutput:
         """
         This function processes the audio file
         """
+
         if self.sr == TranscriptModel.expected_sampling_rate and self.channels == TranscriptModel.expected_channels:
-            self.audio_split_channels = split_channels(audio=self.audio)
-            self.downsampled_audio = DownsampleOutput(
-                downsampled_left_channel=self.audio_split_channels.left_channel,
-                downsampled_right_channel=self.audio_split_channels.right_channel
-            )
-            self.raw_transcripts = await self._transcribe_stereo_calls()
-            return self.raw_transcripts
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Transcribe Mono 16k calls",
+            ) as span:
+                with propagate_attributes(
+                    metadata={"sampling_rate": self.sr, "channels": self.channels}
+                ):
+                    self.audio_split_channels = split_channels(audio=self.audio)
+                    self.downsampled_audio = DownsampleOutput(
+                        downsampled_left_channel=self.audio_split_channels.left_channel,
+                        downsampled_right_channel=self.audio_split_channels.right_channel
+                    )
+                    self.raw_transcripts = await self._transcribe_stereo_calls()
+
+                    span.update(output=self.raw_transcripts)
+
+                    return self.raw_transcripts
 
         elif self.sr > TranscriptModel.expected_sampling_rate and self.channels == TranscriptModel.expected_channels:
-            self.audio_split_channels = split_channels(audio=self.audio)
-            self.downsampled_audio = downsample_audio(
-                audio_left_channel=self.audio_split_channels.left_channel,
-                audio_right_channel=self.audio_split_channels.right_channel,
-                original_sampling_rate=self.sr
-            )
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Transcribe Higher Sampling rate Stereo",
+            ) as span:
+                with propagate_attributes(
+                    metadata={"sampling_rate": self.sr, "channels": self.channels}
+                ):  
+                    self.audio_split_channels = split_channels(audio=self.audio)
+                    self.downsampled_audio = downsample_audio(
+                        audio_left_channel=self.audio_split_channels.left_channel,
+                        audio_right_channel=self.audio_split_channels.right_channel,
+                        original_sampling_rate=self.sr
+                    )
 
-            if self.downsampled_audio is None:
-                return TranscriptionServiceOutput(
-                    transcript=[],
-                    status=TranscriptStatus.TRANSCRIPTION_ERROR,
-                    channels=self.channels,
-                    sampling_rate=self.sr
-                )
+                    if self.downsampled_audio is None:
+                        return TranscriptionServiceOutput(
+                            transcript=[],
+                            status=TranscriptStatus.TRANSCRIPTION_ERROR,
+                            channels=self.channels,
+                            sampling_rate=self.sr
+                        )
 
-            self.raw_transcripts = await self._transcribe_stereo_calls()
-            return self.raw_transcripts
+                    self.raw_transcripts = await self._transcribe_stereo_calls()
+                    span.update(output=self.raw_transcripts)
+
+                    return self.raw_transcripts
 
         elif self.sr < TranscriptModel.expected_sampling_rate and self.channels < TranscriptModel.expected_channels:
-            self.downsampled_audio = self.audio
-            self.raw_transcripts = await self._transcribe_mono_calls()
-            return self.raw_transcripts
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Transcribe Low Sampling rate Mono",
+            ) as span:
+                with propagate_attributes(
+                    metadata={"sampling_rate": self.sr, "channels": self.channels}
+                ):  
+                    self.downsampled_audio = self.audio
+                    self.raw_transcripts = await self._transcribe_mono_calls()
+
+                    span.update(output=self.raw_transcripts)
+
+                    return self.raw_transcripts
         
         elif self.sr > TranscriptModel.expected_sampling_rate and self.channels < TranscriptModel.expected_channels:
-            self.downsampled_audio = self.audio
+            with langfuse_client.start_as_current_observation(
+                as_type="span",
+                name="Transcribe High Sampling rate Mono",
+            ) as span:
+                with propagate_attributes(
+                    metadata={"sampling_rate": self.sr, "channels": self.channels}
+                ):  
+                    self.downsampled_audio = self.audio
 
-            self.raw_transcripts = await self._transcribe_mono_calls()
-            return self.raw_transcripts
+                    self.raw_transcripts = await self._transcribe_mono_calls()
+
+                    span.update(output=self.raw_transcripts)
+
+                    return self.raw_transcripts
 
         else:
             logger.error(f"Unsupported file format")
