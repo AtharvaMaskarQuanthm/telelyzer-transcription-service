@@ -210,7 +210,7 @@ class TranscriptionService:
         missed_percent = (missed_duration / total_vad_duration * 100) if total_vad_duration > 0 else 0
         
         # Log results
-        langfuse_client.update_current_observation(
+        langfuse_client.update_current_span(
                     metadata={
                         "total_vad_duration": total_vad_duration, 
                         "total_vad_segments": vad_segments, 
@@ -502,7 +502,7 @@ class TranscriptionService:
                 left_chunks = left_chunks or []
                 right_chunks = right_chunks or []
 
-            langfuse_client.update_current_observation(
+            langfuse_client.update_current_span(
                 metadata={
                     "num_left_chunks": len(left_chunks), 
                     "num_right_chunks": len(right_chunks), 
@@ -667,7 +667,7 @@ class TranscriptionService:
             logger.error(f"Error transcribing mono audio : {e}")
             raise
     
-    @observe
+    @observe()
     async def process(self) -> TranscriptionServiceOutput:
         """
         This function processes the audio file

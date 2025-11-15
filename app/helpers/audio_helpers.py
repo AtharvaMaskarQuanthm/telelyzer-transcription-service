@@ -54,7 +54,7 @@ def split_channels(audio: np.ndarray) -> SplitChannelsOutput:
         right_channel = audio[1]
     )
 
-@observe
+@observe()
 def downsample_audio(audio_left_channel : np.ndarray, audio_right_channel : np.ndarray, original_sampling_rate : int) -> DownsampleOutput:
     
     start_time = time.time()

@@ -29,7 +29,7 @@ LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 langfuse_client = Langfuse(
     public_key=LANGFUSE_PUBLIC_KEY,
     secret_key=LANGFUSE_SECRET_KEY,
-    base_url=LANGFUSE_BASE_URL # US region: https://us.cloud.langfuse.com
+    base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
 )
 
 print(os.getenv("YOUR_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY"))
@@ -151,7 +151,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
             }
 
 
-@observe
+@observe()
 def main():
     runpod.serverless.start({"handler": handler})
 
