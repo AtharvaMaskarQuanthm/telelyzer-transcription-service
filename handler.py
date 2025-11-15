@@ -23,11 +23,12 @@ logger = get_logger()
 load_dotenv()
 
 langfuse_client = Langfuse(
-    public_key=os.getenv("YOUR_PUBLIC_KEY"),
-    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    public_key="pk-lf-99830cbb-597c-4d14-9087-3f015ed8d67f",
+    secret_key="sk-lf-cb623f62-07aa-4ba3-9089-85fcf2c75236",
     base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
 )
 
+print(os.getenv("YOUR_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY"))
 
 @observe(name="Handler")
 async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
