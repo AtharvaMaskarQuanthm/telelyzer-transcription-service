@@ -27,11 +27,16 @@ from app.utils.shared_resources import SharedResources
 logger = get_logger()
 load_dotenv()
 
+LANGFUSE_SECRET_KEY = "sk-lf-db4ef20a-6683-4c06-8a6a-bc3880af1bcb"
+LANGFUSE_PUBLIC_KEY = "pk-lf-322d9ee4-d538-4bf2-8fca-e58ffa272855"
+LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
+
 langfuse_client = Langfuse(
-    public_key="pk-lf-99830cbb-597c-4d14-9087-3f015ed8d67f",
-    secret_key="sk-lf-cb623f62-07aa-4ba3-9089-85fcf2c75236",
-    base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
+    public_key=LANGFUSE_PUBLIC_KEY,
+    secret_key=LANGFUSE_SECRET_KEY,
+    base_url=LANGFUSE_BASE_URL # US region: https://us.cloud.langfuse.com
 )
+
 print(os.getenv("YOUR_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY"))
 
 class TranscriptionService:
