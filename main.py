@@ -1,7 +1,6 @@
 import os
 from dotenv import load_dotenv 
 
-
 from dataclasses import asdict
 from fastapi import FastAPI, Query, HTTPException
 from langsmith import traceable
@@ -19,6 +18,7 @@ import uvicorn
 app = FastAPI()
 
 load_dotenv()
+
 # Response model - Create as Pydantic model, not inheriting from dataclass
 class TranscriptionResponse(BaseModel):
     transcript: List[dict]  # Adjust based on your actual structure

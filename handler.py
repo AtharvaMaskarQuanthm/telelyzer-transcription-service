@@ -10,8 +10,9 @@ from dotenv import load_dotenv
 from typing import Dict, Any
 from langsmith import traceable, Client
 
-from langfuse import observe, propagate_attributes
-import langfuse
+import os
+
+from langfuse import observe, propagate_attributes, Langfuse
 
 from app.services.transcription_service import TranscriptionService
 from app.models.transcription_service import TranscriptStatus
@@ -20,6 +21,12 @@ from app.utils.logger import get_logger
 
 logger = get_logger()
 load_dotenv()
+
+langfuse_client = Langfuse(
+    public_key=os.getenv("YOUR_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
+)
 
 
 @observe(name="Handler")

@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass
 from dotenv import load_dotenv
 from langsmith import traceable
-from langfuse import observe
+from langfuse import observe, Langfuse
 
 from app.models.transcription_service import TranscriptModel
 from app.utils.logger import get_logger
@@ -23,6 +23,12 @@ class SplitChannelsOutput:
 class DownsampleOutput:
     downsampled_left_channel : np.ndarray
     downsampled_right_channel : np.ndarray
+
+langfuse_client = Langfuse(
+    public_key=os.getenv("YOUR_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
+)
 
 @observe(name="Split Channels")
 def split_channels(audio: np.ndarray) -> SplitChannelsOutput:

@@ -9,7 +9,7 @@ import numpy as np
 from dotenv import load_dotenv
 from silero_vad import get_speech_timestamps
 from langsmith import traceable
-from langfuse import observe, propagate_attributes, get_client
+from langfuse import observe, propagate_attributes, Langfuse
 
 from typing import Dict, List, Literal, Optional, Tuple
 
@@ -27,7 +27,11 @@ from app.utils.shared_resources import SharedResources
 logger = get_logger()
 load_dotenv()
 
-langfuse_client = get_client()
+langfuse_client = Langfuse(
+    public_key=os.getenv("YOUR_PUBLIC_KEY"),
+    secret_key=os.getenv("LANGFUSE_SECRET_KEY"),
+    base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
+)
 
 class TranscriptionService:
     """
