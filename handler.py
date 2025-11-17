@@ -34,6 +34,7 @@ langfuse_client = Langfuse(
 
 print(os.getenv("YOUR_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY"))
 
+@observe("Handler")
 async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
     RunPod serverless handler for transcription.
