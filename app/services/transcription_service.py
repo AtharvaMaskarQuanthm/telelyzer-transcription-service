@@ -27,8 +27,8 @@ from app.utils.shared_resources import SharedResources
 logger = get_logger()
 load_dotenv()
 
-LANGFUSE_SECRET_KEY = "sk-lf-db4ef20a-6683-4c06-8a6a-bc3880af1bcb"
-LANGFUSE_PUBLIC_KEY = "pk-lf-322d9ee4-d538-4bf2-8fca-e58ffa272855"
+LANGFUSE_SECRET_KEY = "sk-lf-62c69480-3e69-4026-82c5-f317e2e896a7"
+LANGFUSE_PUBLIC_KEY = "pk-lf-2988b244-1da8-43ca-9ab5-7c44f0786567"
 LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
 
 langfuse_client = Langfuse(
