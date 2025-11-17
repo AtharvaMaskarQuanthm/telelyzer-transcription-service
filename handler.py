@@ -56,6 +56,9 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
 
         try:
             job_input = job["input"]
+            call_uuid = job_input.get("call_uuid")
+            if call_uuid:
+                langfuse_client.update_current_span(name=call_uuid)
             
             # Option 1: URL-based transcription
             if "audio_url" in job_input:
