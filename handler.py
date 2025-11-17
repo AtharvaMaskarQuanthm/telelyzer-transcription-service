@@ -150,8 +150,6 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                 "success": False
             }
 
-
-@observe()
 def main():
     runpod.serverless.start({"handler": handler})
 
