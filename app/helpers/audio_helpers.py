@@ -5,8 +5,6 @@ import time
 
 from dataclasses import dataclass
 from dotenv import load_dotenv
-from langsmith import traceable
-from langfuse import observe, Langfuse
 
 from app.models.transcription_service import TranscriptModel
 from app.utils.logger import get_logger
@@ -24,20 +22,6 @@ class DownsampleOutput:
     downsampled_left_channel : np.ndarray
     downsampled_right_channel : np.ndarray
 
-LANGFUSE_SECRET_KEY = "sk-lf-62c69480-3e69-4026-82c5-f317e2e896a7"
-LANGFUSE_PUBLIC_KEY = "pk-lf-2988b244-1da8-43ca-9ab5-7c44f0786567"
-LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
-
-langfuse_client = Langfuse(
-    public_key=LANGFUSE_PUBLIC_KEY,
-    secret_key=LANGFUSE_SECRET_KEY,
-    base_url=LANGFUSE_BASE_URL # US region: https://us.cloud.langfuse.com
-)
-
-
-print(os.getenv("YOUR_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY"))
-
-@observe(name="Split Channels")
 def split_channels(audio: np.ndarray) -> SplitChannelsOutput:
     """
     This helper function split the channels into 2 channels. 
@@ -54,7 +38,6 @@ def split_channels(audio: np.ndarray) -> SplitChannelsOutput:
         right_channel = audio[1]
     )
 
-@observe()
 def downsample_audio(audio_left_channel : np.ndarray, audio_right_channel : np.ndarray, original_sampling_rate : int) -> DownsampleOutput:
     
     start_time = time.time()

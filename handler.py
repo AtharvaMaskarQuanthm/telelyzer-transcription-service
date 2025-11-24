@@ -8,11 +8,8 @@ import librosa
 from dataclasses import asdict
 from dotenv import load_dotenv
 from typing import Dict, Any
-from langsmith import traceable, Client
 
 import os
-
-from langfuse import observe, propagate_attributes, Langfuse
 
 from app.services.transcription_service import TranscriptionService
 from app.models.transcription_service import TranscriptStatus
@@ -21,18 +18,6 @@ from app.utils.logger import get_logger
 
 logger = get_logger()
 load_dotenv()
-
-LANGFUSE_SECRET_KEY = "sk-lf-62c69480-3e69-4026-82c5-f317e2e896a7"
-LANGFUSE_PUBLIC_KEY = "pk-lf-2988b244-1da8-43ca-9ab5-7c44f0786567"
-LANGFUSE_BASE_URL = "https://cloud.langfuse.com"
-
-langfuse_client = Langfuse(
-    public_key=LANGFUSE_PUBLIC_KEY,
-    secret_key=LANGFUSE_SECRET_KEY,
-    base_url="https://cloud.langfuse.com" # US region: https://us.cloud.langfuse.com
-)
-
-print(os.getenv("YOUR_PUBLIC_KEY"), os.getenv("LANGFUSE_SECRET_KEY"))
 
 async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -49,41 +34,21 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
     3. Base64 audio file:
        {"input": {"audio_base64": "base64_encoded_audio_data", "filename": "audio.mp3"}}
     """
-
-    with langfuse_client.start_as_current_observation(
-        as_type="span",
-        name="Handler",
-    ) as root_span:
-        with propagate_attributes(
-            metadata={"service": "Transcription Service"}
-        ):
-
-            try:
+    try:
                 job_input = job["input"]
                 call_uuid = job_input.get("call_uuid")
-                if call_uuid:
-                    root_span.update_current_span(name=call_uuid)
                 
                 # Option 1: URL-based transcription
                 if "audio_url" in job_input:
-                    with langfuse_client.start_as_current_observation(
-                        as_type="span",
-                        name="Process audio url",
-                    ) as span:
                         audio_url = job_input["audio_url"]
                         logger.info(f"Processing audio from URL: {audio_url}")
                         
                         transcription_service = TranscriptionService(audio_url=audio_url)
                         transcripts = await transcription_service.process()
 
-                        span.update(output = {"transcript": transcripts})
                 
                 # Option 2: Waveform-based transcription
                 elif "audio_waveform" in job_input and "sampling_rate" in job_input:
-                    with langfuse_client.start_as_current_observation(
-                        as_type="span",
-                        name="Process audio url",
-                    ) as span:
                             logger.info("Processing audio from waveform")
                             
                             audio_format = AudioWaveFormFormat(
@@ -94,14 +59,9 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                             transcription_service = TranscriptionService(audio_waveform=audio_format)
                             transcripts = await transcription_service.process()
 
-                            span.update(output = {"transcript": transcripts})
                 
                 # Option 3: Base64 encoded audio file
                 elif "audio_base64" in job_input:
-                    with langfuse_client.start_as_current_observation(
-                        as_type="span",
-                        name="Process audio url",
-                    ) as span:
                         logger.info("Processing audio from base64 encoded file")
                         
                         # Decode base64 audio
@@ -129,7 +89,6 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                             transcription_service = TranscriptionService(audio_waveform=audio_format)
                             transcripts = await transcription_service.process()
 
-                            span.update(output = {"transcript": transcripts})
                             
                         finally:
                             # Clean up temp file
@@ -149,7 +108,7 @@ async def handler(job: Dict[str, Any]) -> Dict[str, Any]:
                     "success": transcripts.status != TranscriptStatus.TRANSCRIPTION_ERROR
                 }
             
-            except Exception as e:
+    except Exception as e:
                 logger.error(f"Error during transcription: {e}", exc_info=True)
                 return {
                     "error": str(e),
